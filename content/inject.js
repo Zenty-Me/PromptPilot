@@ -1,4 +1,5 @@
 var PromptInjector = (function () {
+  var customSites = [];
   var INPUT_SELECTORS = {
     "chatgpt.com": [
       "#prompt-textarea",
@@ -52,11 +53,50 @@ var PromptInjector = (function () {
     ],
   };
 
+  try {
+    chrome.storage.local.get({ customSites: [] }, function (data) {
+      customSites = data.customSites || [];
+    });
+    chrome.storage.onChanged.addListener(function (changes, areaName) {
+      if (areaName === "local" && changes.customSites) {
+        customSites = changes.customSites.newValue || [];
+      }
+    });
+  } catch (e) {}
+
+  function getCustomSite() {
+    var href = window.location.href;
+    return customSites.find(function (site) {
+      if (!site.enabled) return false;
+      var pattern = String(site.pattern || "").trim();
+      if (!pattern) return false;
+      var regex = new RegExp(
+        "^" +
+          pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") +
+          "$",
+        "i",
+      );
+      return regex.test(href) || regex.test(window.location.hostname);
+    });
+  }
+
+  function querySelectorSafe(selector) {
+    if (!selector) return null;
+    try {
+      return document.querySelector(selector);
+    } catch (e) {
+      return null;
+    }
+  }
+
   function getHostname() {
     return window.location.hostname;
   }
 
   function findInputElement() {
+    var customSite = getCustomSite();
+    var customInput = customSite && querySelectorSafe(customSite.inputSelector);
+    if (customInput) return customInput;
     var hostname = getHostname();
     var selectors = INPUT_SELECTORS[hostname];
     if (selectors) {
@@ -131,6 +171,9 @@ var PromptInjector = (function () {
   }
 
   function findSendButton() {
+    var customSite = getCustomSite();
+    var customButton = customSite && querySelectorSafe(customSite.sendSelector);
+    if (customButton) return customButton;
     var buttonSelectors = [
       'button[data-testid="send-button"]',
       'button[aria-label="Send"]',

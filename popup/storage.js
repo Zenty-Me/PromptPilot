@@ -10,6 +10,7 @@ var PromptStorage = (function () {
     theme: "dark",
     viewMode: "list",
     promptOrder: {},
+    customSites: [],
   };
 
   function ensureDefaults(callback) {
@@ -199,6 +200,40 @@ var PromptStorage = (function () {
   function getCategories(callback) {
     STORAGE.get({ categories: [] }, function (data) {
       callback(data.categories || []);
+    });
+  }
+
+  function getCustomSites(callback) {
+    STORAGE.get({ customSites: [] }, function (data) {
+      callback(data.customSites || []);
+    });
+  }
+
+  function saveCustomSite(site, callback) {
+    getCustomSites(function (sites) {
+      var index = sites.findIndex(function (item) {
+        return item.id === site.id;
+      });
+      if (index === -1) sites.push(site);
+      else sites[index] = site;
+      STORAGE.set({ customSites: sites }, function () {
+        if (callback) callback(sites);
+      });
+    });
+  }
+
+  function deleteCustomSite(id, callback) {
+    getCustomSites(function (sites) {
+      STORAGE.set(
+        {
+          customSites: sites.filter(function (site) {
+            return site.id !== id;
+          }),
+        },
+        function () {
+          if (callback) callback();
+        },
+      );
     });
   }
 
@@ -452,6 +487,9 @@ var PromptStorage = (function () {
     incrementUsage: incrementUsage,
     getRecentPrompt: getRecentPrompts,
     getCategories: getCategories,
+    getCustomSites: getCustomSites,
+    saveCustomSite: saveCustomSite,
+    deleteCustomSite: deleteCustomSite,
     addCategory: addCategory,
     deleteCategory: deleteCategory,
     saveSortSetting: saveSortSetting,

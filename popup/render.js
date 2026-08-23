@@ -378,6 +378,27 @@ var PromptRender = (function () {
       .join("");
   }
 
+  function renderCustomSiteList(sites, container) {
+    container.innerHTML = (sites || [])
+      .map(function (site) {
+        return (
+          '<div class="custom-site-item" data-site-id="' +
+          site.id +
+          '">' +
+          '<div class="custom-site-info"><strong>' +
+          escapeHtml(site.name) +
+          "</strong><span>" +
+          escapeHtml(site.pattern) +
+          "</span></div>" +
+          '<button class="cat-item-delete" data-site-delete="' +
+          site.id +
+          '" title="删除"><i data-lucide="trash-2"></i></button>' +
+          "</div>"
+        );
+      })
+      .join("");
+  }
+
   return {
     renderCategoryTabs: renderCategoryTabs,
     populateCategorySelect: populateCategorySelect,
@@ -386,5 +407,6 @@ var PromptRender = (function () {
     renderGroupedPromptList: renderGroupedPromptList,
     renderRecentChips: renderRecentChips,
     renderCategoryManageList: renderCategoryManageList,
+    renderCustomSiteList: renderCustomSiteList,
   };
 })();

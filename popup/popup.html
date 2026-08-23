@@ -145,6 +145,17 @@
               </div>
             </div>
             <div class="settings-section">
+              <h3>自定义站点</h3>
+              <div id="custom-site-list" class="custom-site-list"></div>
+              <div class="custom-site-form">
+                <input type="text" id="custom-site-name" placeholder="站点名称" />
+                <input type="text" id="custom-site-pattern" placeholder="网址，如 https://example.com/*" />
+                <input type="text" id="custom-site-input" placeholder="输入框 CSS Selector" />
+                <input type="text" id="custom-site-send" placeholder="发送按钮 Selector（可选）" />
+                <button id="btn-add-custom-site" class="btn btn-small btn-primary">添加</button>
+              </div>
+            </div>
+            <div class="settings-section">
               <h3>数据管理</h3>
               <div class="data-actions">
                 <button id="btn-export" class="btn btn-secondary"><i data-lucide="upload"></i> 导出</button>

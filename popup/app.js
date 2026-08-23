@@ -63,6 +63,12 @@ var App = (function () {
     els.categoryTabs = document.getElementById("category-tabs");
     els.settingsSort = document.getElementById("settings-sort");
     els.categoryList = document.getElementById("category-list");
+    els.customSiteList = document.getElementById("custom-site-list");
+    els.customSiteName = document.getElementById("custom-site-name");
+    els.customSitePattern = document.getElementById("custom-site-pattern");
+    els.customSiteInput = document.getElementById("custom-site-input");
+    els.customSiteSend = document.getElementById("custom-site-send");
+    els.btnAddCustomSite = document.getElementById("btn-add-custom-site");
     els.btnAddCategory = document.getElementById("btn-add-category");
     els.btnExport = document.getElementById("btn-export");
     els.btnImport = document.getElementById("btn-import");
@@ -117,6 +123,48 @@ var App = (function () {
         }
       });
     });
+  }
+
+  function loadCustomSites() {
+    PromptStorage.getCustomSites(function (sites) {
+      PromptRender.renderCustomSiteList(sites, els.customSiteList);
+      refreshIcons();
+    });
+  }
+
+  function addCustomSite() {
+    var name = els.customSiteName.value.trim();
+    var pattern = els.customSitePattern.value.trim();
+    var inputSelector = els.customSiteInput.value.trim();
+    var sendSelector = els.customSiteSend.value.trim();
+    if (!name || !pattern || !inputSelector) {
+      showToast("请填写站点名称、网址和输入框选择器", "error");
+      return;
+    }
+    try {
+      new URL(pattern.replace(/\*.*$/, ""));
+    } catch (e) {
+      showToast("网址格式不正确", "error");
+      return;
+    }
+    PromptStorage.saveCustomSite(
+      {
+        id: PromptUtils.generateId("site"),
+        name: name,
+        pattern: pattern,
+        inputSelector: inputSelector,
+        sendSelector: sendSelector,
+        enabled: true,
+      },
+      function () {
+        els.customSiteName.value = "";
+        els.customSitePattern.value = "";
+        els.customSiteInput.value = "";
+        els.customSiteSend.value = "";
+        loadCustomSites();
+        showToast("站点已添加", "success");
+      },
+    );
   }
   function closeConfirm() {
     els.confirmOverlay.classList.add("hidden");
@@ -504,6 +552,7 @@ var App = (function () {
     els.btnSettings.addEventListener("click", function () {
       PromptStorage.loadData(function (data) {
         PromptEditor.openSettings(els, data);
+        loadCustomSites();
       });
     });
 
@@ -517,6 +566,17 @@ var App = (function () {
 
     els.btnAddCategory.addEventListener("click", function () {
       PromptEditor.addCategory(els, loadPrompts);
+    });
+
+    els.btnAddCustomSite.addEventListener("click", addCustomSite);
+
+    els.customSiteList.addEventListener("click", function (e) {
+      var button = e.target.closest("[data-site-delete]");
+      if (!button) return;
+      PromptStorage.deleteCustomSite(button.dataset.siteDelete, function () {
+        loadCustomSites();
+        showToast("站点已删除", "info");
+      });
     });
 
     els.categoryList.addEventListener("click", function (e) {
