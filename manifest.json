@@ -1,0 +1,64 @@
+{
+  "manifest_version": 3,
+  "name": "PromptPilot",
+  "version": "2.0.0",
+  "description": "一键向网页版 AI 注入提示词",
+  "permissions": ["storage", "activeTab", "scripting", "sidePanel"],
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://chat.deepseek.com/*",
+        "https://tongyi.aliyun.com/*",
+        "https://kimi.moonshot.cn/*",
+        "https://chat.baidu.com/*",
+        "https://chat.zhipu.ai/*",
+        "https://www.doubao.com/*"
+      ],
+      "js": [
+        "lib/nanoid.js",
+        "lib/purify.min.js",
+        "lib/ev-emitter.js",
+        "lib/get-size.js",
+        "lib/unidragger.js",
+        "lib/draggabilly.js",
+        "lib/lucide.min.js",
+        "shared/utils.js",
+        "content/inject.js",
+        "content/panel.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "open-prompt-panel": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+P",
+        "mac": "Command+Shift+P"
+      },
+      "description": "打开提示词快速选择面板"
+    }
+  }
+}

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PromptPilot</title>
+    <link rel="stylesheet" href="popup.css" />
+    <link rel="stylesheet" href="../lib/notyf.min.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1><span class="brand-mark" aria-hidden="true"></span>PromptPilot</h1>
+        <div class="header-actions">
+          <button id="btn-theme" class="btn-icon" title="切换主题"><i data-lucide="sun-moon"></i></button>
+          <button id="btn-batch" class="btn-icon" title="批量操作"><i data-lucide="square-check-big"></i></button>
+          <button id="btn-add" class="btn-icon" title="添加提示词 (Ctrl+N)"><i data-lucide="plus"></i></button>
+          <button id="btn-sidepanel" class="btn-icon" title="打开侧边栏"><i data-lucide="panel-right"></i></button>
+          <button id="btn-settings" class="btn-icon btn-icon-gear" title="设置"><i data-lucide="settings-2"></i></button>
+        </div>
+      </div>
+
+      <div class="category-tabs-row">
+        <div id="category-tabs" class="category-tabs">
+          <button class="cat-tab active" data-cat="all">全部</button>
+        </div>
+        <div class="view-toggle">
+          <button id="btn-view-list" class="view-btn active" title="列表视图">☰</button>
+          <button id="btn-view-group" class="view-btn" title="分组视图">⊟</button>
+        </div>
+      </div>
+
+      <div class="search-bar">
+        <input type="text" id="search-input" placeholder="搜索提示词..." />
+      </div>
+
+      <div id="recent-bar" class="recent-bar hidden">
+        <span class="recent-label">最近</span>
+        <div id="recent-chips" class="recent-chips"></div>
+      </div>
+
+      <div id="prompt-list" class="prompt-list"></div>
+
+      <div id="empty-state" class="empty-state">
+        <div class="empty-icon"><i data-lucide="file-plus-2"></i></div>
+        <p>还没有提示词</p>
+        <p class="empty-hint">点击右上角 + 添加你的第一条提示词</p>
+      </div>
+
+      <div id="batch-bar" class="batch-bar hidden">
+        <span id="batch-count">已选 0 项</span>
+        <div class="batch-actions">
+          <button id="btn-batch-delete" class="btn btn-small btn-danger">删除</button>
+          <button id="btn-batch-export" class="btn btn-small btn-secondary">导出</button>
+          <button id="btn-batch-cancel" class="btn btn-small btn-secondary">取消</button>
+        </div>
+      </div>
+
+      <div id="editor-overlay" class="overlay hidden">
+        <div class="editor">
+          <div class="editor-header">
+            <h2 id="editor-title">添加提示词</h2>
+            <button id="btn-editor-close" class="btn-icon-sm">&times;</button>
+          </div>
+          <div class="editor-body">
+            <div class="field-group">
+              <label for="input-title">标题 <span class="required">*</span></label>
+              <input type="text" id="input-title" placeholder="给提示词起个名字" />
+              <div id="error-title" class="field-error hidden">请输入标题</div>
+            </div>
+            <div class="field-group">
+              <label for="input-category">分类</label>
+              <select id="input-category"></select>
+            </div>
+            <div class="field-group field-content">
+              <div class="field-label-row">
+                <label for="input-content">内容 <span class="required">*</span></label>
+                <button id="btn-insert-var" class="btn-insert-var" title="插入变量">{{}}</button>
+              </div>
+              <textarea id="input-content" rows="6" placeholder="输入提示词内容..."></textarea>
+              <div class="field-footer">
+                <div class="template-hint">
+                  <i data-lucide="lightbulb"></i> <code>{{变量名}}</code> 创建变量，<code>{{变量名:默认值}}</code> 设默认值
+                </div>
+                <div id="char-count" class="char-count">0 字</div>
+              </div>
+              <div id="error-content" class="field-error hidden">请输入内容</div>
+            </div>
+            <div class="field-group">
+              <label for="input-tags">标签 <span class="hint">（逗号分隔）</span></label>
+              <input type="text" id="input-tags" placeholder="例如: 编程, 翻译, 写作" />
+            </div>
+          </div>
+          <div class="editor-actions">
+            <button id="btn-delete" class="btn btn-danger hidden">删除</button>
+            <div class="spacer"></div>
+            <button id="btn-cancel" class="btn btn-secondary">取消</button>
+            <button id="btn-save" class="btn btn-primary">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="template-overlay" class="overlay hidden">
+        <div class="template-dialog">
+          <div class="editor-header">
+            <h2>填写模板变量</h2>
+            <button id="btn-template-close" class="btn-icon-sm">&times;</button>
+          </div>
+          <div id="template-fields" class="template-fields"></div>
+          <div class="template-preview">
+            <label>预览</label>
+            <div id="template-preview-content" class="preview-content"></div>
+          </div>
+          <div class="dialog-actions">
+            <div class="spacer"></div>
+            <button id="btn-template-cancel" class="btn btn-secondary">取消</button>
+            <button id="btn-template-inject" class="btn btn-primary">注入</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="settings-overlay" class="overlay hidden">
+        <div class="settings-dialog">
+          <div class="editor-header">
+            <h2>设置</h2>
+            <button id="btn-settings-close" class="btn-icon-sm">&times;</button>
+          </div>
+          <div class="settings-body">
+            <div class="settings-section">
+              <h3>排序方式</h3>
+              <select id="settings-sort">
+                <option value="updatedAt">更新时间</option>
+                <option value="title">标题</option>
+                <option value="usageCount">使用次数</option>
+                <option value="custom">自定义拖拽</option>
+              </select>
+            </div>
+            <div class="settings-section">
+              <h3>分类管理</h3>
+              <div id="category-list" class="category-manage-list"></div>
+              <div class="add-category-row">
+                <input type="text" id="new-cat-icon" placeholder="图标" maxlength="2" class="cat-icon-input" />
+                <input type="text" id="new-cat-name" placeholder="分类名称" class="cat-name-input" />
+                <button id="btn-add-category" class="btn btn-small btn-primary">添加</button>
+              </div>
+            </div>
+            <div class="settings-section">
+              <h3>数据管理</h3>
+              <div class="data-actions">
+                <button id="btn-export" class="btn btn-secondary"><i data-lucide="upload"></i> 导出</button>
+                <button id="btn-import" class="btn btn-secondary"><i data-lucide="download"></i> 导入</button>
+                <button id="btn-reset" class="btn btn-danger"><i data-lucide="rotate-ccw"></i> 重置预设</button>
+              </div>
+              <input type="file" id="import-file" accept=".json" class="hidden" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="confirm-overlay" class="overlay hidden">
+        <div class="confirm-dialog">
+          <p id="confirm-message"></p>
+          <div class="confirm-actions">
+            <button id="btn-confirm-cancel" class="btn btn-secondary">取消</button>
+            <button id="btn-confirm-ok" class="btn btn-danger">确定</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="context-menu" class="context-menu hidden">
+        <button class="ctx-item" data-action="inject"><i data-lucide="send"></i> 注入</button>
+        <button class="ctx-item" data-action="edit"><i data-lucide="pencil"></i> 编辑</button>
+        <button class="ctx-item" data-action="duplicate"><i data-lucide="copy"></i> 复制</button>
+        <button class="ctx-item" data-action="pin"><i data-lucide="pin"></i> 置顶/取消</button>
+        <button class="ctx-item ctx-danger" data-action="delete"><i data-lucide="trash-2"></i> 删除</button>
+      </div>
+    </div>
+
+    <script src="../lib/nanoid.js"></script>
+    <script src="../lib/purify.min.js"></script>
+    <script src="../lib/sortable.min.js"></script>
+    <script src="../lib/notyf.min.js"></script>
+    <script src="../lib/hotkeys-js.min.js"></script>
+    <script src="../lib/lucide.min.js"></script>
+    <script src="../shared/utils.js"></script>
+    <script src="../shared/defaults.js"></script>
+    <script src="storage.js"></script>
+    <script src="render.js"></script>
+    <script src="editor.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
