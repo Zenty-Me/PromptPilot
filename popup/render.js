@@ -312,7 +312,7 @@ var PromptRender = (function () {
         '<div class="category-group-header" data-group-cat="' +
         cat.id +
         '">' +
-        '<span class="collapse-icon">▼</span> ' +
+        '<i class="collapse-icon" data-lucide="chevron-down"></i>' +
         escapeHtml(cat.icon || "") +
         " " +
         escapeHtml(cat.name) +
@@ -379,20 +379,89 @@ var PromptRender = (function () {
   }
 
   function renderCustomSiteList(sites, container) {
-    container.innerHTML = (sites || [])
+    if (!sites || !sites.length) {
+      container.innerHTML =
+        '<div class="settings-empty">还没有自定义站点，在下方添加一个</div>';
+      return;
+    }
+    container.innerHTML = sites
       .map(function (site) {
+        var enabled = site.enabled !== false;
         return (
-          '<div class="custom-site-item" data-site-id="' +
+          '<div class="custom-site-item' +
+          (enabled ? "" : " is-disabled") +
+          '" data-site-id="' +
           site.id +
           '">' +
-          '<div class="custom-site-info"><strong>' +
+          '<label class="site-switch" title="' +
+          (enabled ? "点击禁用" : "点击启用") +
+          '">' +
+          '<input type="checkbox" data-site-toggle="' +
+          site.id +
+          '"' +
+          (enabled ? " checked" : "") +
+          " />" +
+          '<span class="site-switch-track" aria-hidden="true"></span>' +
+          "</label>" +
+          '<div class="custom-site-info">' +
+          "<strong>" +
           escapeHtml(site.name) +
-          "</strong><span>" +
+          "</strong>" +
+          '<span class="site-pattern">' +
           escapeHtml(site.pattern) +
-          "</span></div>" +
-          '<button class="cat-item-delete" data-site-delete="' +
+          "</span>" +
+          '<span class="site-selectors">输入框 <code>' +
+          escapeHtml(site.inputSelector || "") +
+          "</code>" +
+          (site.sendSelector
+            ? ' · 发送 <code>' + escapeHtml(site.sendSelector) + "</code>"
+            : "") +
+          "</span>" +
+          '<span class="site-perm-badge hidden" data-site-perm="' +
+          site.id +
+          '">未授权</span>' +
+          "</div>" +
+          '<div class="custom-site-actions">' +
+          '<button class="site-action" data-site-edit="' +
+          site.id +
+          '" title="编辑"><i data-lucide="pencil"></i></button>' +
+          '<button class="site-action site-action-danger" data-site-delete="' +
           site.id +
           '" title="删除"><i data-lucide="trash-2"></i></button>' +
+          "</div>" +
+          "</div>"
+        );
+      })
+      .join("");
+  }
+
+  function renderShortcutList(bindings, container) {
+    var meta = PromptDefaults.SHORTCUT_META || [];
+    container.innerHTML = meta
+      .map(function (item) {
+        var combo = bindings[item.id] || "";
+        return (
+          '<div class="shortcut-item" data-shortcut-id="' +
+          item.id +
+          '">' +
+          '<div class="shortcut-info">' +
+          "<strong>" +
+          escapeHtml(item.name) +
+          "</strong>" +
+          "<span>" +
+          escapeHtml(item.desc) +
+          "</span>" +
+          "</div>" +
+          '<button type="button" class="shortcut-key' +
+          (combo ? "" : " is-empty") +
+          '" data-sc-record="' +
+          item.id +
+          '" title="点击录制新组合键">' +
+          escapeHtml(PromptUtils.formatShortcut(combo)) +
+          "</button>" +
+          '<button type="button" class="shortcut-reset" data-sc-reset="' +
+          item.id +
+          '" title="恢复默认"><i data-lucide="rotate-ccw"></i></button>' +
           "</div>"
         );
       })
@@ -408,5 +477,6 @@ var PromptRender = (function () {
     renderRecentChips: renderRecentChips,
     renderCategoryManageList: renderCategoryManageList,
     renderCustomSiteList: renderCustomSiteList,
+    renderShortcutList: renderShortcutList,
   };
 })();

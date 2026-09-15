@@ -8,6 +8,9 @@ var App = (function () {
   var promptListSortable = null;
   var confirmCallback = null;
   var contextTargetId = null;
+  var editingSiteId = null;
+  var shortcutBindings = {};
+  var recordingShortcutId = null;
 
   var notyf = new Notyf({
     duration: 2500,
@@ -69,6 +72,15 @@ var App = (function () {
     els.customSiteInput = document.getElementById("custom-site-input");
     els.customSiteSend = document.getElementById("custom-site-send");
     els.btnAddCustomSite = document.getElementById("btn-add-custom-site");
+    els.btnCancelEditSite = document.getElementById("btn-cancel-edit-site");
+    els.siteFormTitle = document.getElementById("custom-site-form-title");
+    els.shortcutList = document.getElementById("shortcut-list");
+    els.btnResetShortcuts = document.getElementById("btn-reset-shortcuts");
+    els.btnOpenChromeShortcuts = document.getElementById(
+      "btn-open-chrome-shortcuts",
+    );
+    els.globalShortcutValue = document.getElementById("global-shortcut-value");
+    els.shortcutCaptureHint = document.getElementById("shortcut-capture-hint");
     els.btnAddCategory = document.getElementById("btn-add-category");
     els.btnExport = document.getElementById("btn-export");
     els.btnImport = document.getElementById("btn-import");
@@ -129,42 +141,233 @@ var App = (function () {
     PromptStorage.getCustomSites(function (sites) {
       PromptRender.renderCustomSiteList(sites, els.customSiteList);
       refreshIcons();
+      markUnauthorizedSites(sites);
     });
   }
 
-  function addCustomSite() {
+  // 逐个站点核对主机权限，未授权的打上「未授权」标记
+  function markUnauthorizedSites(sites) {
+    if (!chrome.permissions || !chrome.permissions.contains) return;
+    sites.forEach(function (site) {
+      var origin = originOfPattern(site.pattern);
+      if (!origin) return;
+      chrome.permissions.contains({ origins: [origin] }, function (has) {
+        var badge = els.customSiteList.querySelector(
+          '[data-site-perm="' + site.id + '"]',
+        );
+        if (badge && !has) badge.classList.remove("hidden");
+      });
+    });
+  }
+
+  function loadShortcuts() {
+    PromptStorage.getShortcuts(function (bindings) {
+      shortcutBindings = bindings;
+      PromptRender.renderShortcutList(bindings, els.shortcutList);
+      refreshIcons();
+    });
+  }
+
+  // 读取 Chrome 全局命令当前绑定，并把结果同步给 background 供内容脚本避让
+  function loadGlobalShortcuts() {
+    if (!chrome.commands || !chrome.commands.getAll) return;
+    chrome.commands.getAll(function (commands) {
+      var bound = (commands || []).filter(function (c) {
+        return !!c.shortcut;
+      });
+      els.globalShortcutValue.textContent = bound.length
+        ? bound
+            .map(function (c) {
+              return c.shortcut;
+            })
+            .join("、")
+        : "未设置";
+      try {
+        chrome.runtime.sendMessage(
+          { type: "pp_refresh_global_shortcuts" },
+          function () {
+            void chrome.runtime.lastError;
+          },
+        );
+      } catch (e) {}
+    });
+  }
+
+  function stopShortcutRecording() {
+    recordingShortcutId = null;
+    if (els.shortcutCaptureHint) els.shortcutCaptureHint.classList.add("hidden");
+    document.removeEventListener("keydown", onShortcutRecordKey, true);
+  }
+
+  function startShortcutRecording(actionId) {
+    stopShortcutRecording();
+    recordingShortcutId = actionId;
+    if (els.shortcutCaptureHint)
+      els.shortcutCaptureHint.classList.remove("hidden");
+    document.addEventListener("keydown", onShortcutRecordKey, true);
+  }
+
+  function onShortcutRecordKey(event) {
+    if (!recordingShortcutId) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    var actionId = recordingShortcutId;
+    var key = PromptUtils.keyFromKeyboardEvent(event);
+    if (key === "esc") {
+      stopShortcutRecording();
+      loadShortcuts();
+      return;
+    }
+    if (key === "backspace" || key === "delete") {
+      saveShortcut(actionId, "");
+      stopShortcutRecording();
+      return;
+    }
+    var combo = PromptUtils.comboFromKeyboardEvent(event);
+    if (!combo) return; // 只按了修饰键，继续等待主键
+    saveShortcut(actionId, combo);
+    stopShortcutRecording();
+  }
+
+  function saveShortcut(actionId, combo) {
+    var meta = (PromptDefaults.SHORTCUT_META || []).find(function (item) {
+      return item.id === actionId;
+    });
+    var names = {};
+    (PromptDefaults.SHORTCUT_META || []).forEach(function (item) {
+      names[item.id] = item.name;
+    });
+
+    var result = PromptUtils.validateShortcut(combo, {
+      scope: meta && meta.scope,
+      selfId: actionId,
+      bindings: shortcutBindings,
+      names: names,
+    });
+    if (!result.ok) {
+      showToast(result.reason || "快捷键无效", "error");
+      return;
+    }
+
+    var next = Object.assign({}, shortcutBindings);
+    next[actionId] = result.combo;
+    shortcutBindings = next;
+    PromptStorage.saveShortcuts(next, function () {
+      PromptRender.renderShortcutList(next, els.shortcutList);
+      refreshIcons();
+      showToast(
+        result.combo
+          ? "已设为 " + PromptUtils.formatShortcut(result.combo)
+          : "已清除该快捷键",
+        "success",
+      );
+    });
+  }
+
+  // 从用户填写的网址推导申请权限用的 origin（https://example.com/*）
+  function originOfPattern(pattern) {
+    return PromptUtils.originOfPattern(pattern);
+  }
+
+  function resetSiteForm() {
+    editingSiteId = null;
+    els.customSiteName.value = "";
+    els.customSitePattern.value = "";
+    els.customSiteInput.value = "";
+    els.customSiteSend.value = "";
+    els.btnAddCustomSite.textContent = "添加";
+    els.btnCancelEditSite.classList.add("hidden");
+    if (els.siteFormTitle) els.siteFormTitle.textContent = "添加站点";
+  }
+
+  function fillSiteForm(site) {
+    editingSiteId = site.id;
+    els.customSiteName.value = site.name || "";
+    els.customSitePattern.value = site.pattern || "";
+    els.customSiteInput.value = site.inputSelector || "";
+    els.customSiteSend.value = site.sendSelector || "";
+    els.btnAddCustomSite.textContent = "保存";
+    els.btnCancelEditSite.classList.remove("hidden");
+    if (els.siteFormTitle) els.siteFormTitle.textContent = "编辑站点";
+    els.customSiteName.focus();
+  }
+
+  // 权限是脚本能否注入的前提：未授权时保存但标注，避免用户以为功能坏了
+  function requestSitePermission(origin, onResult) {
+    if (!chrome.permissions || !chrome.permissions.contains) {
+      onResult(true);
+      return;
+    }
+    chrome.permissions.contains({ origins: [origin] }, function (has) {
+      if (has) {
+        onResult(true);
+        return;
+      }
+      if (!chrome.permissions.request) {
+        onResult(false);
+        return;
+      }
+      chrome.permissions.request({ origins: [origin] }, function (granted) {
+        onResult(!!granted);
+      });
+    });
+  }
+
+  function syncSiteScripts() {
+    try {
+      chrome.runtime.sendMessage({ type: "pp_sync_sites" }, function () {
+        void chrome.runtime.lastError;
+      });
+    } catch (e) {}
+  }
+
+  function submitCustomSite() {
     var name = els.customSiteName.value.trim();
     var pattern = els.customSitePattern.value.trim();
     var inputSelector = els.customSiteInput.value.trim();
     var sendSelector = els.customSiteSend.value.trim();
+
     if (!name || !pattern || !inputSelector) {
       showToast("请填写站点名称、网址和输入框选择器", "error");
       return;
     }
-    try {
-      new URL(pattern.replace(/\*.*$/, ""));
-    } catch (e) {
-      showToast("网址格式不正确", "error");
+    var origin = originOfPattern(pattern);
+    if (!origin) {
+      showToast("网址格式不正确，需形如 https://example.com/*", "error");
       return;
     }
-    PromptStorage.saveCustomSite(
-      {
-        id: PromptUtils.generateId("site"),
+
+    var isEdit = !!editingSiteId;
+    PromptStorage.getCustomSites(function (sites) {
+      var existing = isEdit
+        ? sites.find(function (s) {
+            return s.id === editingSiteId;
+          })
+        : null;
+
+      var site = {
+        id: existing ? existing.id : PromptUtils.generateId("site"),
         name: name,
         pattern: pattern,
         inputSelector: inputSelector,
         sendSelector: sendSelector,
-        enabled: true,
-      },
-      function () {
-        els.customSiteName.value = "";
-        els.customSitePattern.value = "";
-        els.customSiteInput.value = "";
-        els.customSiteSend.value = "";
-        loadCustomSites();
-        showToast("站点已添加", "success");
-      },
-    );
+        enabled: existing ? existing.enabled !== false : true,
+      };
+
+      requestSitePermission(origin, function (granted) {
+        PromptStorage.saveCustomSite(site, function () {
+          resetSiteForm();
+          loadCustomSites();
+          syncSiteScripts();
+          if (!granted) {
+            showToast("已保存，但未授权该站点，无法自动注入", "error");
+          } else {
+            showToast(isEdit ? "站点已更新" : "站点已添加", "success");
+          }
+        });
+      });
+    });
   }
   function closeConfirm() {
     els.confirmOverlay.classList.add("hidden");
@@ -286,17 +489,7 @@ var App = (function () {
             chrome.scripting.executeScript(
               {
                 target: { tabId: tabId },
-                files: [
-                  "lib/nanoid.js",
-                  "lib/purify.min.js",
-                  "lib/ev-emitter.js",
-                  "lib/get-size.js",
-                  "lib/unidragger.js",
-                  "lib/draggabilly.js",
-                  "shared/utils.js",
-                  "content/inject.js",
-                  "content/panel.js",
-                ],
+                files: PromptDefaults.CONTENT_SCRIPT_FILES,
               },
               function () {
                 if (chrome.runtime.lastError) {
@@ -553,10 +746,13 @@ var App = (function () {
       PromptStorage.loadData(function (data) {
         PromptEditor.openSettings(els, data);
         loadCustomSites();
+        loadShortcuts();
+        loadGlobalShortcuts();
       });
     });
 
     els.btnSettingsClose.addEventListener("click", function () {
+      stopShortcutRecording();
       PromptEditor.closeSettings(els, loadPrompts);
     });
 
@@ -568,15 +764,102 @@ var App = (function () {
       PromptEditor.addCategory(els, loadPrompts);
     });
 
-    els.btnAddCustomSite.addEventListener("click", addCustomSite);
+    els.btnAddCustomSite.addEventListener("click", submitCustomSite);
+
+    els.btnCancelEditSite.addEventListener("click", function () {
+      resetSiteForm();
+    });
+
+    els.customSiteList.addEventListener("change", function (e) {
+      var toggle = e.target.closest("[data-site-toggle]");
+      if (!toggle) return;
+      var siteId = toggle.dataset.siteToggle;
+      var enabled = toggle.checked;
+      PromptStorage.toggleCustomSite(siteId, enabled, function () {
+        loadCustomSites();
+        syncSiteScripts();
+        showToast(enabled ? "站点已启用" : "站点已禁用", "info");
+      });
+    });
 
     els.customSiteList.addEventListener("click", function (e) {
-      var button = e.target.closest("[data-site-delete]");
-      if (!button) return;
-      PromptStorage.deleteCustomSite(button.dataset.siteDelete, function () {
-        loadCustomSites();
-        showToast("站点已删除", "info");
+      var editButton = e.target.closest("[data-site-edit]");
+      if (editButton) {
+        var editId = editButton.dataset.siteEdit;
+        PromptStorage.getCustomSites(function (sites) {
+          var site = sites.find(function (s) {
+            return s.id === editId;
+          });
+          if (site) fillSiteForm(site);
+        });
+        return;
+      }
+
+      var deleteButton = e.target.closest("[data-site-delete]");
+      if (!deleteButton) return;
+      var deleteId = deleteButton.dataset.siteDelete;
+      showConfirm("确定要删除这个自定义站点吗？", function () {
+        PromptStorage.getCustomSites(function (sites) {
+          var target = sites.find(function (s) {
+            return s.id === deleteId;
+          });
+          PromptStorage.deleteCustomSite(deleteId, function () {
+            if (target) {
+              try {
+                chrome.runtime.sendMessage(
+                  {
+                    type: "pp_revoke_site",
+                    siteId: deleteId,
+                    origin: originOfPattern(target.pattern),
+                  },
+                  function () {
+                    void chrome.runtime.lastError;
+                  },
+                );
+              } catch (err) {}
+            }
+            if (editingSiteId === deleteId) resetSiteForm();
+            loadCustomSites();
+            showToast("站点已删除", "info");
+          });
+        });
       });
+    });
+
+    els.shortcutList.addEventListener("click", function (e) {
+      var recordButton = e.target.closest("[data-sc-record]");
+      if (recordButton) {
+        startShortcutRecording(recordButton.dataset.scRecord);
+        return;
+      }
+      var resetButton = e.target.closest("[data-sc-reset]");
+      if (!resetButton) return;
+      var actionId = resetButton.dataset.scReset;
+      var meta = (PromptDefaults.SHORTCUT_META || []).find(function (item) {
+        return item.id === actionId;
+      });
+      saveShortcut(actionId, (meta && meta.def) || "");
+    });
+
+    els.btnResetShortcuts.addEventListener("click", function () {
+      showConfirm("确定要恢复默认快捷键吗？", function () {
+        PromptStorage.resetShortcuts(function (defaults) {
+          shortcutBindings = defaults;
+          PromptRender.renderShortcutList(defaults, els.shortcutList);
+          refreshIcons();
+          showToast("已恢复默认快捷键", "success");
+        });
+      });
+    });
+
+    els.btnOpenChromeShortcuts.addEventListener("click", function () {
+      try {
+        chrome.tabs.create({ url: "chrome://extensions/shortcuts" }, function () {
+          void chrome.runtime.lastError;
+        });
+      } catch (e) {
+        showToast("无法打开 Chrome 快捷键设置", "error");
+      }
     });
 
     els.categoryList.addEventListener("click", function (e) {
@@ -723,8 +1006,9 @@ var App = (function () {
     });
 
     els.settingsOverlay.addEventListener("click", function (e) {
-      if (e.target === els.settingsOverlay)
-        PromptEditor.closeSettings(els, loadPrompts);
+      if (e.target !== els.settingsOverlay) return;
+      stopShortcutRecording();
+      PromptEditor.closeSettings(els, loadPrompts);
     });
 
     bindHotkeys();

@@ -64,20 +64,38 @@ var PromptInjector = (function () {
     });
   } catch (e) {}
 
-  function getCustomSite() {
+  // 返回当前页面命中的自定义站点，按 pattern 长度降序（越具体越优先）
+  function getMatchingSites() {
     var href = window.location.href;
-    return customSites.find(function (site) {
-      if (!site.enabled) return false;
-      var pattern = String(site.pattern || "").trim();
-      if (!pattern) return false;
-      var regex = new RegExp(
-        "^" +
-          pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") +
-          "$",
-        "i",
-      );
-      return regex.test(href) || regex.test(window.location.hostname);
-    });
+    var host = window.location.hostname;
+    return customSites
+      .filter(function (site) {
+        if (!site || site.enabled === false) return false;
+        var pattern = String(site.pattern || "").trim();
+        if (!pattern) return false;
+        var regex;
+        try {
+          regex = new RegExp(
+            "^" +
+              pattern
+                .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+                .replace(/\*/g, ".*") +
+              "$",
+            "i",
+          );
+        } catch (e) {
+          return false;
+        }
+        return regex.test(href) || regex.test(host);
+      })
+      .sort(function (a, b) {
+        return String(b.pattern || "").length - String(a.pattern || "").length;
+      });
+  }
+
+  function getCustomSite() {
+    var matched = getMatchingSites();
+    return matched.length ? matched[0] : null;
   }
 
   function querySelectorSafe(selector) {
@@ -127,36 +145,100 @@ var PromptInjector = (function () {
     return null;
   }
 
-  function setNativeValue(element, value) {
-    var isTextarea =
-      element.tagName === "TEXTAREA" || element.tagName === "INPUT";
-    if (isTextarea) {
-      var nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype ||
-          window.HTMLInputElement.prototype,
-        "value",
-      );
-      if (nativeInputValueSetter && nativeInputValueSetter.set) {
-        nativeInputValueSetter.set.call(element, value);
-      } else {
-        element.value = value;
-      }
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      element.dispatchEvent(new Event("change", { bubbles: true }));
-    } else {
-      element.focus();
+  function selectAllContent(element) {
+    try {
+      var range = document.createRange();
+      range.selectNodeContents(element);
+      var selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (e) {
       document.execCommand("selectAll", false, null);
-      document.execCommand("insertText", false, value);
-      element.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
 
-  function injectPromptToPage(text, shouldSubmit) {
+  function placeCaretAtEnd(element) {
+    try {
+      var range = document.createRange();
+      range.selectNodeContents(element);
+      range.collapse(false);
+      var selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (e) {}
+  }
+
+  function setFormFieldValue(element, value, append) {
+    var prototype =
+      element.tagName === "TEXTAREA"
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype;
+    var descriptor =
+      prototype && Object.getOwnPropertyDescriptor(prototype, "value");
+    var next = value;
+    if (append) {
+      var current = element.value || "";
+      next = current && !/\s$/.test(current) ? current + "\n" + value : current + value;
+    }
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(element, next);
+    } else {
+      element.value = next;
+    }
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function setContentEditableValue(element, value, append) {
+    element.focus();
+    if (append) {
+      placeCaretAtEnd(element);
+    } else {
+      selectAllContent(element);
+    }
+
+    var inserted = false;
+    try {
+      inserted = document.execCommand("insertText", false, value);
+    } catch (e) {
+      inserted = false;
+    }
+
+    if (!inserted) {
+      // 部分站点会拦截 execCommand，兜底直接改 DOM 再补发 input 事件
+      if (append) {
+        element.appendChild(document.createTextNode(value));
+      } else {
+        element.textContent = value;
+      }
+      placeCaretAtEnd(element);
+    }
+    element.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        inputType: "insertText",
+        data: value,
+      }),
+    );
+  }
+
+  function setNativeValue(element, value, mode) {
+    var isFormField =
+      element.tagName === "TEXTAREA" || element.tagName === "INPUT";
+    if (isFormField) {
+      setFormFieldValue(element, value, mode === "append");
+    } else {
+      setContentEditableValue(element, value, mode === "append");
+    }
+  }
+
+  function injectPromptToPage(text, shouldSubmit, options) {
     var inputEl = findInputElement();
     if (!inputEl) {
       return { success: false, error: "未找到输入框" };
     }
-    setNativeValue(inputEl, text);
+    var mode = options && options.mode === "append" ? "append" : "replace";
+    setNativeValue(inputEl, text, mode);
     if (shouldSubmit) {
       setTimeout(function () {
         var sendButton = findSendButton();
@@ -182,13 +264,17 @@ var PromptInjector = (function () {
       'button[aria-label="提交"]',
       'button[title="Send"]',
       'button[title="发送"]',
+      'button[aria-label*="send" i]',
+      'button[aria-label*="发送" i]',
+      'button[data-testid*="send" i]',
     ];
     for (var i = 0; i < buttonSelectors.length; i++) {
       var btn = document.querySelector(buttonSelectors[i]);
-      if (btn) return btn;
+      if (btn && !btn.disabled) return btn;
     }
     var buttons = document.querySelectorAll("button");
     for (var k = 0; k < buttons.length; k++) {
+      if (buttons[k].disabled) continue;
       var svg = buttons[k].querySelector("svg");
       if (svg) {
         var ariaLabel = (
@@ -211,15 +297,41 @@ var PromptInjector = (function () {
   function simulateEnter(element) {
     var isTextarea =
       element.tagName === "TEXTAREA" || element.tagName === "INPUT";
-    var opts = { key: "Enter", code: "Enter", keyCode: 13, bubbles: true };
+    var opts = {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+    };
     if (!isTextarea) opts.composed = true;
     element.dispatchEvent(new KeyboardEvent("keydown", opts));
     element.dispatchEvent(new KeyboardEvent("keypress", opts));
     element.dispatchEvent(new KeyboardEvent("keyup", opts));
   }
 
+  // 触发网页 AI 的发送动作：优先点发送按钮，找不到则对输入框模拟回车
+  function submitCurrent() {
+    var sendButton = findSendButton();
+    if (sendButton) {
+      sendButton.click();
+      return true;
+    }
+    var inputEl = findInputElement();
+    if (inputEl) {
+      inputEl.focus();
+      simulateEnter(inputEl);
+      return true;
+    }
+    return false;
+  }
+
   return {
     injectPromptToPage: injectPromptToPage,
     findInputElement: findInputElement,
+    findSendButton: findSendButton,
+    simulateEnter: simulateEnter,
+    submitCurrent: submitCurrent,
+    getCustomSite: getCustomSite,
   };
 })();

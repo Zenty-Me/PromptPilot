@@ -10,13 +10,13 @@
   <body>
     <div class="container">
       <div class="header">
-        <h1><span class="brand-mark" aria-hidden="true"></span>PromptPilot</h1>
+        <h1><i class="brand-icon" data-lucide="command"></i>PromptPilot</h1>
         <div class="header-actions">
           <button id="btn-theme" class="btn-icon" title="切换主题"><i data-lucide="sun-moon"></i></button>
           <button id="btn-batch" class="btn-icon" title="批量操作"><i data-lucide="square-check-big"></i></button>
           <button id="btn-add" class="btn-icon" title="添加提示词 (Ctrl+N)"><i data-lucide="plus"></i></button>
           <button id="btn-sidepanel" class="btn-icon" title="打开侧边栏"><i data-lucide="panel-right"></i></button>
-          <button id="btn-settings" class="btn-icon btn-icon-gear" title="设置"><i data-lucide="settings-2"></i></button>
+          <button id="btn-settings" class="btn-icon" title="设置"><i data-lucide="settings-2"></i></button>
         </div>
       </div>
 
@@ -60,7 +60,7 @@
         <div class="editor">
           <div class="editor-header">
             <h2 id="editor-title">添加提示词</h2>
-            <button id="btn-editor-close" class="btn-icon-sm">&times;</button>
+            <button id="btn-editor-close" class="btn-icon-sm"><i data-lucide="x"></i></button>
           </div>
           <div class="editor-body">
             <div class="field-group">
@@ -104,7 +104,7 @@
         <div class="template-dialog">
           <div class="editor-header">
             <h2>填写模板变量</h2>
-            <button id="btn-template-close" class="btn-icon-sm">&times;</button>
+            <button id="btn-template-close" class="btn-icon-sm"><i data-lucide="x"></i></button>
           </div>
           <div id="template-fields" class="template-fields"></div>
           <div class="template-preview">
@@ -123,7 +123,7 @@
         <div class="settings-dialog">
           <div class="editor-header">
             <h2>设置</h2>
-            <button id="btn-settings-close" class="btn-icon-sm">&times;</button>
+            <button id="btn-settings-close" class="btn-icon-sm"><i data-lucide="x"></i></button>
           </div>
           <div class="settings-body">
             <div class="settings-section">
@@ -148,11 +148,34 @@
               <h3>自定义站点</h3>
               <div id="custom-site-list" class="custom-site-list"></div>
               <div class="custom-site-form">
-                <input type="text" id="custom-site-name" placeholder="站点名称" />
+                <div class="custom-site-form-title" id="custom-site-form-title">添加站点</div>
+                <input type="text" id="custom-site-name" placeholder="站点名称，如 通义千问" />
                 <input type="text" id="custom-site-pattern" placeholder="网址，如 https://example.com/*" />
-                <input type="text" id="custom-site-input" placeholder="输入框 CSS Selector" />
-                <input type="text" id="custom-site-send" placeholder="发送按钮 Selector（可选）" />
-                <button id="btn-add-custom-site" class="btn btn-small btn-primary">添加</button>
+                <input type="text" id="custom-site-input" class="span-2" placeholder="输入框 CSS Selector，如 #prompt-textarea" />
+                <input type="text" id="custom-site-send" class="span-2" placeholder="发送按钮 Selector（可选）" />
+                <div class="custom-site-form-actions">
+                  <button id="btn-add-custom-site" class="btn btn-small btn-primary">添加</button>
+                  <button id="btn-cancel-edit-site" class="btn btn-small btn-secondary hidden">取消</button>
+                </div>
+              </div>
+              <p class="settings-hint">
+                添加时会向 Chrome 申请该站点的访问权限；授权后刷新页面，悬浮球与页面内快捷键即在该站点生效。
+              </p>
+            </div>
+
+            <div class="settings-section">
+              <h3>快捷键</h3>
+              <div id="shortcut-list" class="shortcut-list"></div>
+              <div class="global-shortcut-row">
+                <span>浏览器全局命令</span>
+                <code id="global-shortcut-value">读取中…</code>
+                <button id="btn-open-chrome-shortcuts" class="btn btn-small btn-secondary">在 Chrome 中修改</button>
+              </div>
+              <p class="settings-hint">
+                浏览器级快捷键由 Chrome 统一管理，扩展无法在运行时改写，需到 Chrome 的快捷键页调整。
+              </p>
+              <div class="shortcut-actions">
+                <button id="btn-reset-shortcuts" class="btn btn-small btn-secondary"><i data-lucide="rotate-ccw"></i> 恢复默认</button>
               </div>
             </div>
             <div class="settings-section">
@@ -166,6 +189,10 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <div id="shortcut-capture-hint" class="shortcut-capture hidden">
+        按下新的组合键…（<kbd>Esc</kbd> 取消，<kbd>Backspace</kbd> 清除）
       </div>
 
       <div id="confirm-overlay" class="overlay hidden">

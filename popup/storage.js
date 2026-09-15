@@ -11,6 +11,8 @@ var PromptStorage = (function () {
     viewMode: "list",
     promptOrder: {},
     customSites: [],
+    shortcuts: null,
+    globalShortcuts: [],
   };
 
   function ensureDefaults(callback) {
@@ -234,6 +236,49 @@ var PromptStorage = (function () {
           if (callback) callback();
         },
       );
+    });
+  }
+
+  // 站点 id 存在则整体覆盖，否则新增
+  function toggleCustomSite(id, enabled, callback) {
+    getCustomSites(function (sites) {
+      var next = sites.map(function (site) {
+        return site.id === id
+          ? Object.assign({}, site, { enabled: !!enabled })
+          : site;
+      });
+      STORAGE.set({ customSites: next }, function () {
+        if (callback) callback(next);
+      });
+    });
+  }
+
+  // 返回「已补全默认值」的快捷键表，缺项一律回落到 SHORTCUT_META.def
+  function getShortcuts(callback) {
+    STORAGE.get({ shortcuts: null }, function (data) {
+      var stored = data.shortcuts || {};
+      var result = {};
+      (PromptDefaults.SHORTCUT_META || []).forEach(function (item) {
+        result[item.id] =
+          typeof stored[item.id] === "string" ? stored[item.id] : item.def;
+      });
+      callback(result);
+    });
+  }
+
+  function saveShortcuts(shortcuts, callback) {
+    STORAGE.set({ shortcuts: shortcuts }, function () {
+      if (callback) callback(shortcuts);
+    });
+  }
+
+  function resetShortcuts(callback) {
+    var defaults = {};
+    (PromptDefaults.SHORTCUT_META || []).forEach(function (item) {
+      defaults[item.id] = item.def;
+    });
+    STORAGE.set({ shortcuts: defaults }, function () {
+      if (callback) callback(defaults);
     });
   }
 
@@ -490,6 +535,10 @@ var PromptStorage = (function () {
     getCustomSites: getCustomSites,
     saveCustomSite: saveCustomSite,
     deleteCustomSite: deleteCustomSite,
+    toggleCustomSite: toggleCustomSite,
+    getShortcuts: getShortcuts,
+    saveShortcuts: saveShortcuts,
+    resetShortcuts: resetShortcuts,
     addCategory: addCategory,
     deleteCategory: deleteCategory,
     saveSortSetting: saveSortSetting,

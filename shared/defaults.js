@@ -156,4 +156,67 @@ var PromptDefaults = {
       updatedAt: Date.now(),
     },
   ],
+
+  // 页面内快捷键定义。
+  // id 与 content/shortcuts.js 的动作分发表一一对应，新增动作必须同步两侧。
+  // scope: "page" 表示网页内全局生效；"panel" 表示仅在悬浮面板打开时生效（允许无修饰键）。
+  // def 为默认组合键；空字符串表示该动作未绑定（禁用）。
+  SHORTCUT_META: [
+    {
+      id: "togglePanel",
+      name: "打开 / 关闭面板",
+      desc: "在当前网页唤起提示词面板",
+      def: "ctrl+shift+p",
+      scope: "page",
+    },
+    {
+      id: "closePanel",
+      name: "关闭面板",
+      desc: "面板打开时按下可关闭",
+      def: "esc",
+      scope: "panel",
+    },
+    {
+      id: "injectRecent",
+      name: "注入最近一条",
+      desc: "跳过面板，直接注入最近使用过的提示词",
+      def: "ctrl+shift+l",
+      scope: "page",
+    },
+    {
+      id: "submit",
+      name: "发送当前输入",
+      desc: "点击网页 AI 的发送按钮",
+      def: "ctrl+shift+enter",
+      scope: "page",
+    },
+    {
+      id: "toggleBall",
+      name: "显示 / 隐藏悬浮球",
+      desc: "临时隐藏页面右下角的悬浮球",
+      def: "ctrl+shift+b",
+      scope: "page",
+    },
+  ],
 };
+
+// 内容脚本加载顺序。manifest.content_scripts、background 的动态注册、
+// popup 的临时注入三处必须共用这一份，顺序错会导致 Draggabilly / nanoid 未定义。
+var CONTENT_SCRIPT_FILES = [
+  "lib/nanoid.js",
+  "lib/purify.min.js",
+  "lib/ev-emitter.js",
+  "lib/get-size.js",
+  "lib/unidragger.js",
+  "lib/draggabilly.js",
+  "lib/lucide.min.js",
+  "shared/utils.js",
+  "shared/defaults.js",
+  "content/panel-styles.js",
+  "content/inject.js",
+  "content/panel.js",
+  "content/shortcuts.js",
+];
+
+// 动态注册 / 注销内容脚本时使用的 ID 前缀，避免误删 manifest 声明的脚本。
+var CONTENT_SCRIPT_ID_PREFIX = "pp-site-";

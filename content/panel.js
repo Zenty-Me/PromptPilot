@@ -5,7 +5,8 @@ var PromptPanel = (function () {
   var currentPanelTemplatePrompt = null;
   var ballEl = null;
   var panelEl = null;
-  var BALL_SIZE = 44;
+  // 直径定义在 content/panel-styles.js（CSS 与 JS 定位必须同源）
+  var BALL_SIZE = PP_BALL_SIZE;
   var BALL_STORAGE_KEY = "ppBallPos";
   var PANEL_STORAGE_KEY = "ppPanelPos";
   var PANEL_SIZE_STORAGE_KEY = "ppPanelSize";
@@ -14,6 +15,30 @@ var PromptPanel = (function () {
   var PANEL_MAX_WIDTH = 600;
   var PANEL_MIN_HEIGHT = 150;
   var RESIZE_EDGE_THRESHOLD = 5;
+  var noticeTimer = null;
+
+  // 页面内轻量提示（面板没打开时也要能给反馈）
+  function showNotice(text) {
+    var el = document.getElementById("pp-notice");
+    if (!el) {
+      // 独立于悬浮球/面板注入：面板未打开时提示仍要工作
+      var noticeStyle = document.createElement("style");
+      noticeStyle.textContent = PP_NOTICE_CSS;
+      (document.head || document.documentElement).appendChild(noticeStyle);
+
+      el = document.createElement("div");
+      el.id = "pp-notice";
+      // 这里只放样式表无法表达的运行时状态（淡入淡出）
+      el.style.cssText = "transition:opacity .2s!important;opacity:1!important";
+      (document.body || document.documentElement).appendChild(el);
+    }
+    el.textContent = text;
+    el.style.opacity = "1";
+    if (noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(function () {
+      el.style.opacity = "0";
+    }, 1800);
+  }
 
   function escapeHtml(str) {
     return PromptUtils.escapeHtml(str);
@@ -72,7 +97,7 @@ var PromptPanel = (function () {
     if (document.getElementById("pp-floating-ball")) return;
 
     ballStyleEl = document.createElement("style");
-    ballStyleEl.textContent = BALL_CSS;
+    ballStyleEl.textContent = PP_BALL_CSS;
     (document.head || document.documentElement).appendChild(ballStyleEl);
 
     var ball = document.createElement("div");
@@ -93,6 +118,45 @@ var PromptPanel = (function () {
     });
 
     bindBallEvents(ball);
+  }
+
+  function removeBall() {
+    var ball = document.getElementById("pp-floating-ball");
+    if (ball && ball.parentNode) ball.parentNode.removeChild(ball);
+    if (ballStyleEl && ballStyleEl.parentNode) {
+      ballStyleEl.parentNode.removeChild(ballStyleEl);
+    }
+    ballStyleEl = null;
+    ballEl = null;
+  }
+
+  function setBallVisible(visible, persist) {
+    if (visible) {
+      createBall();
+    } else {
+      removeBall();
+    }
+    if (persist) {
+      try {
+        chrome.storage.local.set({ showBall: visible });
+      } catch (e) {}
+    }
+  }
+
+  function toggleBall() {
+    var visible = !document.getElementById("pp-floating-ball");
+    setBallVisible(visible, true);
+    showNotice(visible ? "已显示悬浮球" : "已隐藏悬浮球");
+  }
+
+  function restoreBall() {
+    try {
+      chrome.storage.local.get({ showBall: true }, function (data) {
+        if (data.showBall !== false) createBall();
+      });
+    } catch (e) {
+      createBall();
+    }
   }
 
   function bindBallEvents(ball) {
@@ -236,7 +300,7 @@ var PromptPanel = (function () {
   function ensurePanelStyle() {
     if (panelStyleEl) return;
     panelStyleEl = document.createElement("style");
-    panelStyleEl.textContent = PANEL_CSS;
+    panelStyleEl.textContent = PP_PANEL_CSS;
     (document.head || document.documentElement).appendChild(panelStyleEl);
   }
 
@@ -755,11 +819,58 @@ var PromptPanel = (function () {
     });
   }
 
+  // 跳过面板直接注入最近一条使用过的提示词
+  function injectRecent() {
+    try {
+      chrome.storage.local.get({ prompts: [] }, function (data) {
+        var used = (data.prompts || [])
+          .filter(function (p) {
+            return (p.usageCount || 0) > 0;
+          })
+          .sort(function (a, b) {
+            return (b.updatedAt || 0) - (a.updatedAt || 0);
+          });
+        if (!used.length) {
+          showNotice("还没有使用过的提示词");
+          return;
+        }
+        var prompt = used[0];
+        if (PromptUtils.hasVariables(prompt.content)) {
+          if (!document.getElementById("prompt-injector-panel")) {
+            createFloatingPanel();
+          }
+          openPanelTemplate(prompt);
+          return;
+        }
+        var result = PromptInjector.injectPromptToPage(prompt.content, false);
+        if (result && result.success) {
+          incrementPanelUsage(prompt.id);
+          showNotice("已注入「" + prompt.title + "」");
+        } else {
+          showNotice("注入失败：" + ((result && result.error) || "未找到输入框"));
+        }
+      });
+    } catch (e) {
+      showNotice("注入失败");
+    }
+  }
+
+  function submitCurrent() {
+    var done = false;
+    try {
+      done = PromptInjector.submitCurrent();
+    } catch (e) {
+      done = false;
+    }
+    showNotice(done ? "已发送" : "未找到发送按钮");
+    return done;
+  }
+
   function init() {
     if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", createBall);
+      document.addEventListener("DOMContentLoaded", restoreBall);
     } else {
-      createBall();
+      restoreBall();
     }
 
     chrome.runtime.onMessage.addListener(
@@ -789,101 +900,6 @@ var PromptPanel = (function () {
       });
     }
   }
-
-  var BALL_CSS = [
-    "#pp-floating-ball{position:fixed!important;z-index:2147483646!important;width:" +
-      BALL_SIZE +
-      "px!important;height:" +
-      BALL_SIZE +
-      "px!important;border-radius:50%!important;background:linear-gradient(135deg,#89b4fa,#74c7ec)!important;box-shadow:0 2px 12px rgba(137,180,250,0.4)!important;cursor:pointer!important;display:flex!important;align-items:center!important;justify-content:center!important;user-select:none!important;touch-action:none!important;transition:box-shadow 0.2s,transform 0.2s!important;margin:0!important;padding:0!important;border:none!important;outline:none!important;opacity:1!important;visibility:visible!important;pointer-events:auto!important}",
-    "#pp-floating-ball:hover{box-shadow:0 4px 20px rgba(137,180,250,0.6),0 0 0 6px rgba(137,180,250,0.15)!important}",
-    "#pp-floating-ball:active{box-shadow:0 2px 10px rgba(137,180,250,0.5)!important}",
-    "#pp-floating-ball.pp-ball-dragging{opacity:0.85!important;box-shadow:0 6px 24px rgba(137,180,250,0.5)!important}",
-    ".pp-ball-icon{font-size:18px!important;color:#1e1e2e!important;font-weight:700!important;line-height:1!important;pointer-events:none!important;margin:0!important;padding:0!important}",
-    "@keyframes pp-ball-pulse{0%{box-shadow:0 2px 12px rgba(137,180,250,0.4),0 0 0 0 rgba(137,180,250,0.3)}70%{box-shadow:0 2px 12px rgba(137,180,250,0.4),0 0 0 10px rgba(137,180,250,0)}100%{box-shadow:0 2px 12px rgba(137,180,250,0.4),0 0 0 0 rgba(137,180,250,0)}}",
-    "#pp-floating-ball{animation:pp-ball-pulse 2.5s ease-out infinite}",
-    "#pp-floating-ball:hover{animation:none!important}",
-    "#pp-floating-ball.pp-ball-dragging{animation:none!important}",
-  ].join("\n");
-
-  var PANEL_CSS = [
-    '#prompt-injector-panel{position:fixed!important;width:380px;max-width:calc(100vw - 20px);height:420px;max-height:calc(100vh - 20px);min-height:150px;min-width:200px;background:#171a1f!important;border:1px solid #35434a!important;border-top:2px solid #7ce7d8!important;border-radius:10px!important;box-shadow:0 12px 34px rgba(0,0,0,0.42)!important;z-index:2147483647!important;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif!important;color:#e6eee9!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;resize:none!important}',
-    "#prompt-injector-panel.pi-resizing{user-select:none!important;transition:none!important}",
-    "#prompt-injector-panel *{box-sizing:border-box!important}",
-    "#prompt-injector-panel.pi-dragging{opacity:0.92!important;cursor:move!important}",
-    "#pi-header{display:flex!important;justify-content:space-between!important;align-items:center!important;padding:10px 14px!important;background:#20272b!important;border-bottom:1px solid #35434a!important;cursor:move!important;user-select:none!important}",
-    "#pi-header span{font-weight:600!important;font-size:14px!important;pointer-events:none!important;color:#cdd6f4!important}",
-    "#pi-close{background:none!important;border:none!important;color:#cdd6f4!important;font-size:20px!important;cursor:pointer!important;padding:0 4px!important;line-height:1!important;transition:color .15s!important}",
-    "#pi-close:hover{color:#f38ba8!important}",
-    "#pi-cats{display:flex!important;gap:4px!important;padding:6px 10px!important;border-bottom:1px solid #313244!important;overflow-x:auto!important;scrollbar-width:none!important}",
-    "#pi-cats::-webkit-scrollbar{display:none!important}",
-    ".pi-cat{padding:3px 8px!important;border-radius:5px!important;border:1px solid transparent!important;background:none!important;color:#a6adc8!important;font-size:11px!important;cursor:pointer!important;white-space:nowrap!important;transition:all .15s!important}",
-    ".pi-cat:hover{background:#313244!important;color:#cdd6f4!important}",
-    ".pi-cat.active{background:#45475a!important;color:#cdd6f4!important;border-color:#89b4fa!important}",
-    "#pi-search{padding:6px 10px!important;border-bottom:1px solid #313244!important}",
-    "#pi-search-input{width:100%!important;padding:7px 10px!important;background:#181825!important;border:1px solid #45475a!important;border-radius:6px!important;color:#cdd6f4!important;font-size:12px!important;outline:none!important;box-sizing:border-box!important}",
-    "#pi-search-input:focus{border-color:#89b4fa!important}",
-    "#pi-list{overflow-y:auto!important;flex:1!important;padding:2px 0!important;min-height:0!important}",
-    ".pi-item{padding:8px 14px!important;cursor:pointer!important;border-bottom:1px solid #313244!important;transition:background .15s!important}",
-    ".pi-item:hover{background:#313244!important}",
-    ".pi-item:last-child{border-bottom:none!important}",
-    ".pi-item-header{display:flex!important;align-items:center!important;gap:5px!important;margin-bottom:2px!important}",
-    ".pi-item-title{font-weight:600!important;font-size:12px!important;color:#cdd6f4!important;overflow:hidden!important;text-overflow:ellipsis!important;white-space:nowrap!important}",
-    ".pi-pin{font-size:9px!important;color:#f9e2af!important;flex-shrink:0!important}",
-    ".pi-tpl-badge{font-size:9px!important;padding:0 4px!important;border-radius:3px!important;background:#45475a!important;color:#89b4fa!important;flex-shrink:0!important}",
-    ".pi-usage{font-size:9px!important;color:#585b70!important;margin-left:auto!important;flex-shrink:0!important}",
-    ".pi-item-preview{font-size:11px!important;color:#a6adc8!important;font-family:'Cascadia Code','Fira Code',ui-monospace,Consolas,monospace!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}",
-    ".pp-var-chip{display:inline-block!important;font-family:'Cascadia Code','Fira Code',ui-monospace,Consolas,monospace!important;font-size:10px!important;line-height:1.4!important;padding:0 4px!important;margin:0 1px!important;border-radius:4px!important;background:rgba(137,180,250,0.16)!important;color:#89b4fa!important;border:1px solid rgba(137,180,250,0.4)!important;vertical-align:baseline!important}",
-    ".pi-item-tags{margin-top:3px!important;display:flex!important;gap:3px!important;flex-wrap:wrap!important}",
-    ".pi-tag{font-size:9px!important;padding:1px 5px!important;border-radius:3px!important;background:#45475a!important;color:#bac2de!important}",
-    ".pi-empty{padding:20px!important;text-align:center!important;color:#6c7086!important;font-size:12px!important}",
-    "#pi-list::-webkit-scrollbar{width:5px!important}",
-    "#pi-list::-webkit-scrollbar-track{background:transparent!important}",
-    "#pi-list::-webkit-scrollbar-thumb{background:#45475a!important;border-radius:3px!important}",
-    "#pi-template-dialog{position:absolute!important;top:0!important;left:0!important;right:0!important;bottom:0!important;background:#1e1e2e!important;display:flex!important;flex-direction:column!important;z-index:10!important}",
-    "#pi-template-dialog.hidden{display:none!important}",
-    "#pi-tpl-header{display:flex!important;justify-content:space-between!important;align-items:center!important;padding:10px 14px!important;background:#313244!important;border-bottom:1px solid #45475a!important}",
-    "#pi-tpl-header span{font-weight:600!important;font-size:13px!important;color:#cdd6f4!important}",
-    "#pi-tpl-back{background:none!important;border:none!important;color:#89b4fa!important;font-size:12px!important;cursor:pointer!important}",
-    "#pi-tpl-back:hover{color:#74c7ec!important}",
-    "#pi-tpl-fields{padding:10px 14px!important;display:flex!important;flex-direction:column!important;gap:8px!important;overflow-y:auto!important;flex:1!important}",
-    ".pi-tpl-field{display:flex!important;flex-direction:column!important;gap:3px!important}",
-    ".pi-tpl-field label{font-size:11px!important;font-weight:600!important;color:#a6adc8!important}",
-    ".pi-tpl-field input{width:100%!important;padding:6px 10px!important;background:#181825!important;border:1px solid #45475a!important;border-radius:6px!important;color:#cdd6f4!important;font-size:12px!important;outline:none!important}",
-    ".pi-tpl-field input:focus{border-color:#89b4fa!important}",
-    "#pi-tpl-preview{padding:8px 14px!important;border-top:1px solid #313244!important}",
-    "#pi-tpl-preview label{font-size:10px!important;font-weight:600!important;color:#a6adc8!important;display:block!important;margin-bottom:3px!important}",
-    "#pi-tpl-preview-content{font-size:11px!important;color:#cdd6f4!important;background:#181825!important;border:1px solid #313244!important;border-radius:6px!important;padding:6px 8px!important;max-height:80px!important;overflow-y:auto!important;white-space:pre-wrap!important;word-break:break-all!important;line-height:1.4!important}",
-    "#pi-tpl-actions{padding:8px 14px!important;display:flex!important;justify-content:flex-end!important;gap:6px!important;border-top:1px solid #313244!important}",
-    ".pi-btn{padding:5px 12px!important;border-radius:6px!important;font-size:11px!important;font-weight:500!important;cursor:pointer!important;border:none!important;transition:all .15s!important}",
-    ".pi-btn-primary{background:#89b4fa!important;color:#1e1e2e!important}",
-    ".pi-btn-primary:hover{background:#74c7ec!important}",
-    ".pi-btn-secondary{background:#313244!important;color:#cdd6f4!important}",
-    ".pi-btn-secondary:hover{background:#45475a!important}",
-    "#pi-resize-handle{position:absolute!important;left:0!important;bottom:0!important;width:16px!important;height:16px!important;cursor:nwse-resize!important;z-index:5!important;opacity:0.4!important;transition:opacity .15s!important}",
-    "#pi-resize-handle:hover{opacity:0.8!important}",
-    "#pi-resize-handle::before{content:''!important;position:absolute!important;left:3px!important;bottom:3px!important;width:8px!important;height:8px!important;border-left:2px solid #6c7086!important;border-bottom:2px solid #6c7086!important}",
-    "#prompt-injector-panel{--pi-bg:#1e1e2e;--pi-surface:#313244;--pi-overlay:#181825;--pi-border:#45475a;--pi-text:#cdd6f4;--pi-sub:#a6adc8;--pi-dim:#6c7086;--pi-accent:#89b4fa;--pi-accent-hover:#74c7ec;--pi-tag:#45475a;--pi-tag-text:#bac2de;--pi-danger:#f38ba8}",
-    '#prompt-injector-panel[data-theme="light"]{--pi-bg:#eff1f5;--pi-surface:#ccd0da;--pi-overlay:#e6e9ef;--pi-border:#bcc0cc;--pi-text:#4c4f69;--pi-sub:#5c5f77;--pi-dim:#7c7f93;--pi-accent:#1e66f5;--pi-accent-hover:#2a6ef5;--pi-tag:#bcc0cc;--pi-tag-text:#5c5f77;--pi-danger:#d20f39}',
-    "#prompt-injector-panel{background:var(--pi-bg)!important;color:var(--pi-text)!important;border-color:var(--pi-border)!important;border-top-color:var(--pi-accent)!important}",
-    "#prompt-injector-panel #pi-header,#prompt-injector-panel #pi-tpl-header{background:var(--pi-surface)!important;border-color:var(--pi-border)!important}",
-    "#prompt-injector-panel #pi-header span,#prompt-injector-panel #pi-tpl-header span,#prompt-injector-panel #pi-close{color:var(--pi-text)!important}",
-    "#prompt-injector-panel #pi-cats,#prompt-injector-panel #pi-search,#prompt-injector-panel #pi-tpl-preview,#prompt-injector-panel #pi-tpl-actions{border-color:var(--pi-surface)!important}",
-    "#prompt-injector-panel .pi-cat{color:var(--pi-sub)!important}",
-    "#prompt-injector-panel .pi-cat:hover,#prompt-injector-panel .pi-item:hover,#prompt-injector-panel .pi-btn-secondary:hover{background:var(--pi-surface)!important;color:var(--pi-text)!important}",
-    "#prompt-injector-panel .pi-cat.active{background:var(--pi-surface)!important;color:var(--pi-text)!important;border-color:var(--pi-accent)!important}",
-    "#prompt-injector-panel #pi-search-input,#prompt-injector-panel .pi-tpl-field input,#prompt-injector-panel #pi-tpl-preview-content{background:var(--pi-overlay)!important;border-color:var(--pi-border)!important;color:var(--pi-text)!important}",
-    "#prompt-injector-panel #pi-search-input:focus,#prompt-injector-panel .pi-tpl-field input:focus{border-color:var(--pi-accent)!important}",
-    "#prompt-injector-panel .pi-item{border-color:var(--pi-surface)!important}",
-    "#prompt-injector-panel .pi-item-title,#prompt-injector-panel .pi-tpl-field label,#prompt-injector-panel #pi-tpl-preview label{color:var(--pi-text)!important}",
-    "#prompt-injector-panel .pi-item-preview,#prompt-injector-panel .pi-tpl-field input,#prompt-injector-panel .pi-empty{color:var(--pi-sub)!important}",
-    "#prompt-injector-panel .pi-tag,#prompt-injector-panel .pi-tpl-badge{background:var(--pi-tag)!important;color:var(--pi-tag-text)!important}",
-    "#prompt-injector-panel .pp-var-chip{background:color-mix(in srgb,var(--pi-accent) 16%,transparent)!important;color:var(--pi-accent)!important;border-color:color-mix(in srgb,var(--pi-accent) 40%,transparent)!important}",
-    "#prompt-injector-panel .pi-btn-primary{background:var(--pi-accent)!important;color:var(--pi-bg)!important}",
-    "#prompt-injector-panel .pi-btn-primary:hover{background:var(--pi-accent-hover)!important}",
-    "#prompt-injector-panel .pi-btn-secondary{background:var(--pi-surface)!important;color:var(--pi-text)!important}",
-    "#prompt-injector-panel svg[data-lucide]{width:14px!important;height:14px!important;stroke-width:1.8!important;vertical-align:middle!important}",
-  ].join("\n");
 
   var PANEL_HTML = [
     '<div id="pi-header">',
@@ -916,6 +932,16 @@ var PromptPanel = (function () {
   return {
     init: init,
     createFloatingPanel: createFloatingPanel,
+    togglePanel: togglePanel,
+    closePanel: closePanel,
+    toggleBall: toggleBall,
+    setBallVisible: setBallVisible,
+    injectRecent: injectRecent,
+    submitCurrent: submitCurrent,
+    showNotice: showNotice,
+    isPanelOpen: function () {
+      return !!document.getElementById("prompt-injector-panel");
+    },
   };
 })();
 

@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "PromptPilot",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "一键向网页版 AI 注入提示词",
   "permissions": ["storage", "activeTab", "scripting", "sidePanel"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
   "side_panel": {
     "default_path": "popup/popup.html"
   },
@@ -46,8 +47,11 @@
         "lib/draggabilly.js",
         "lib/lucide.min.js",
         "shared/utils.js",
+        "shared/defaults.js",
+        "content/panel-styles.js",
         "content/inject.js",
-        "content/panel.js"
+        "content/panel.js",
+        "content/shortcuts.js"
       ],
       "run_at": "document_idle"
     }
