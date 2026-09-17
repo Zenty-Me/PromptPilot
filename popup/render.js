@@ -132,7 +132,13 @@ var PromptRender = (function () {
         ? '<div class="prompt-item-tags">' +
           p.tags
             .map(function (t) {
-              return '<span class="tag">' + escapeHtml(t) + "</span>";
+              return (
+                '<span class="tag" data-tag="' +
+                escapeHtml(t) +
+                '" title="点击按此标签筛选">' +
+                escapeHtml(t) +
+                "</span>"
+              );
             })
             .join("") +
           "</div>"
@@ -410,7 +416,9 @@ var PromptRender = (function () {
           '<span class="site-pattern">' +
           escapeHtml(site.pattern) +
           "</span>" +
-          site.inputSelector
+          // 三元 + 后续拼接要加括号，否则后半段会被算进 else 分支：
+          // 配好选择器的站点会连"编辑/删除"按钮一起丢掉
+          (site.inputSelector
             ? '<span class="site-selectors">输入框 <code>' +
               escapeHtml(site.inputSelector) +
               "</code>" +
@@ -418,12 +426,15 @@ var PromptRender = (function () {
                 ? ' · 发送 <code>' + escapeHtml(site.sendSelector) + "</code>"
                 : "") +
               "</span>"
-            : '<span class="site-selectors site-selectors-pending">输入框待识别 · 访问该站点后自动补全</span>' +
+            : '<span class="site-selectors site-selectors-pending">输入框待识别 · 访问该站点后自动补全</span>') +
           '<span class="site-perm-badge hidden" data-site-perm="' +
           site.id +
           '">未授权</span>' +
           "</div>" +
           '<div class="custom-site-actions">' +
+          '<button type="button" class="site-action hidden" data-site-grant="' +
+          site.id +
+          '" title="授予访问权限"><i data-lucide="shield-check"></i></button>' +
           '<button class="site-action" data-site-edit="' +
           site.id +
           '" title="编辑"><i data-lucide="pencil"></i></button>' +

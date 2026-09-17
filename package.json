@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "test": "node tests/shortcut.test.js && node tests/consistency.test.js && node tests/theme.test.js && node tests/shortcuts-dom.test.js && node tests/inject-dom.test.js && node tests/detector-dom.test.js && node dragtest.js"
+    "test": "node tests/shortcut.test.js && node tests/consistency.test.js && node tests/theme.test.js && node tests/shortcuts-dom.test.js && node tests/inject-dom.test.js && node tests/detector-dom.test.js && node tests/site-match.test.js && node tests/popup-dom.test.js && node tests/panel-ball.test.js && node dragtest.js"
   },
   "dependencies": {
     "dompurify": "^3.4.14",

@@ -147,6 +147,12 @@ svg[data-lucide] {
   vertical-align: middle;
 }
 
+/* 通用显隐：此前每个组件各自写 .x.hidden，漏一个就永远藏不住
+   （#import-file、#custom-site 的未授权标记都踩过这个坑） */
+.hidden {
+  display: none !important;
+}
+
 /* ------------------------------ 顶栏 ------------------------------ */
 
 .header {
@@ -379,6 +385,47 @@ svg[data-lucide] {
   border-color: var(--accent-line);
 }
 
+/* ------------------------------ 行动条 ------------------------------ */
+
+/* 失败场景的可操作出口：与批量条同语汇，但用强调色标记"这里有下一步" */
+.action-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 7px 12px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent-line);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.action-bar-icon {
+  display: flex;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.action-bar-icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+#action-bar-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 /* ------------------------------ 提示词列表 ------------------------------ */
 
 .prompt-list {
@@ -520,6 +567,15 @@ svg[data-lucide] {
   border-radius: var(--r-xs);
   background: var(--tag-bg);
   color: var(--tag-text);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--dur), color var(--dur), border-color var(--dur);
+}
+
+.tag:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-line);
 }
 
 /* 行内操作：默认隐身，hover/选中才浮现 */

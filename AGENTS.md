@@ -5,12 +5,15 @@ Chrome extension (Manifest V3), vanilla JS. One-way injects prompts into web-AI 
 ## Build & verification
 
 - **No build step and no bundler.** The extension runs directly from source. Load it unpacked via `chrome://extensions` (enable Developer mode) → "Load unpacked".
-- **No linter or CI.** Run `npm test` before declaring work done — it runs four suites plus the legacy drag check:
+- **No linter or CI.** Run `npm test` before declaring work done — it runs nine suites plus the legacy drag check:
   - `tests/shortcut.test.js` — shortcut parse/match/format/validate + URL normalization (pure logic, `vm`-loaded).
-  - `tests/consistency.test.js` — static cross-file contract check (DOM ids, `data-*` producers/consumers, message types, cross-module exports, manifest vs `CONTENT_SCRIPT_FILES`).
+  - `tests/consistency.test.js` — static cross-file contract check (DOM ids, `data-*` producers/consumers, message types, cross-module exports, manifest vs `CONTENT_SCRIPT_FILES`, `hidden` 类的 CSS 兜底).
   - `tests/shortcuts-dom.test.js` — `content/shortcuts.js` dispatch behaviour driven by real jsdom `KeyboardEvent`s.
-  - `tests/inject-dom.test.js` — custom-site matching, `enabled` filtering, selector precedence.
+  - `tests/inject-dom.test.js` — custom-site matching, `enabled` filtering, selector precedence, replace/append 注入模式.
   - `tests/detector-dom.test.js` — `shared/detector.js` selector generation / input & send detection, plus `content/inject.js` writing detected selectors back to storage.
+  - `tests/site-match.test.js` — `PromptUtils.matchSiteForUrl` / `patternMatchesUrl`（最具体优先、enabled 过滤、端口忽略）.
+  - `tests/popup-dom.test.js` — popup 交互：用真实 jsdom + 桩 `chrome` API 加载整套 `popup/*.js`，覆盖标签筛选、追加注入、注入失败自愈、未授权站点授权。要加新的 popup 交互测试就放这里，别再造一套 harness。
+  - `tests/panel-ball.test.js` — `content/panel.js` 悬浮球定位：right/bottom ↔ left/top 换算、越界夹取、窗口 resize 后重新夹取。这是唯一真正加载 `content/panel.js` 的测试，也因此守住了 `panel-styles.js` 必须先于 `panel.js` 的加载顺序。
   - `dragtest.js` — jsdom check of the Draggabilly drag stack.
 - `node --check <file>` still catches syntax errors, but is not sufficient on its own.
 - After editing any source file, **reload the extension** at `chrome://extensions` for changes to take effect.
@@ -63,9 +66,23 @@ Chrome extension (Manifest V3), vanilla JS. One-way injects prompts into web-AI 
 ## Conventions / gotchas
 
 - Template variables use double-brace syntax `{{name:default}}`; `fillTemplate` falls back to the default (or leaves the raw token) when no value is supplied.
+- **Every failure path needs an exit, not just a toast.** 注入失败 / 未授权站点这类终态必须给用户可点的下一步（见下方「失败自愈」）。新功能的验收标准包含"失败之后怎么走"。
 - All persistence is `chrome.storage.local` (survives browser restart), initialized from `PromptDefaults` on first run.
 - Icons draw from local Lucide (no network/emoji) — keep new UI consistent.
 - Custom sites let users override input/send Selectors. Resolution order is **custom site → built-in hostname map → generic `contenteditable`/`textarea` detection** (custom sites win over built-ins). When several custom patterns match, the longest `pattern` wins; `enabled === false` sites are skipped, and a missing `enabled` field is treated as enabled.
 - `CONTENT_SCRIPT_FILES` in `shared/defaults.js` is the single source for content-script load order — manifest `content_scripts`, background dynamic registration, and the popup's `executeScript` fallback all reference it. Never hand-roll the list.
-- `injectPromptToPage(text, shouldSubmit, options)` accepts `options.mode` of `"replace"` (default) or `"append"`.
+- `injectPromptToPage(text, shouldSubmit, options)` accepts `options.mode` of `"replace"` (default) or `"append"`。append 走已有内容之后追加（textarea 用 `\n` 连接），入口有两个：popup 右键菜单「追加到现有内容」，以及面板里 **Alt + 点击**条目；模板填值注入会沿用发起时选定的 mode（`pendingInjectMode` / `currentPanelTemplateMode`）。
+- 悬浮球位置落盘的是 `right`/`bottom`（距视口右下角的距离），球体坐标只由它推导。**改动位置时必须经 `applyBallPos`**（它把最终 left/top 夹进视口再反推 right/bottom），并且 `ballPos` 内存副本要在拖拽/吸附后同步（`persistBallPos`）。窗口 resize 会重新夹取 —— 少了这一步，用户把窗口拖窄后球会永久停在视口外点不到。
 - Content-script UI strings are Chinese; keep new user-facing copy in the same voice.
+
+## 失败自愈（failure → next step）
+
+- **popup**：`doInject` 失败 → `offerRepair()` 用 `PromptUtils.matchSiteForUrl` 找到当前页面命中的站点（没有就用 `deriveSitePattern` 推导一条），弹出行动条 `#action-bar`（`showActionBar(text, btnLabel, handler)` / `hideActionBar()`，在列表上方，不止贴合一个场景，也能给"Site added, reload?"用）。点按钮 → 申请权限 → `detectFromActiveTab` → 写回站点 → **自动重试刚才那次注入**（`lastInjectState`）。
+- **面板**：`injectFromPanel` 统一收口。失败时先用页面里已经加载的 `PromptDetector` 就地重识别并写 storage，等 storage 事件回流（`setTimeout` 80ms）再重试一次；仍失败才收尾提示。
+- **未授权**：站点列表每项都有默认隐藏的 `[data-site-grant]` 按钮，`markUnauthorizedSites()` 同时管未授权标记和这个按钮的显隐。授权成功后 `suggestTabReload()` 找到正在访问该站点的标签页问一句要不要刷新（内容脚本只在页面加载时注入）。
+- popup 既作为 action popup 也作为侧边栏运行：`isPopupWindow()` 判断是否该 `window.close()` —— 侧边栏里不关，避免同一份代码两种行为。
+
+## Styling 陷阱
+
+- `.hidden` 是**通用工具类**（`popup/popup.css`），不是每个组件各写一条的历史遗留方式。组件级的 `.x.hidden` 曾经漏过：`#import-file`、站点"未授权"标记都因此藏不住。`tests/consistency.test.js` 守着这条底线。
+- 拼接 HTML 字符串时，**三元表达式后面还要继续拼接就必须加括号**。render.js 曾因为漏括号把"未授权标记 + 编辑/删除按钮"整段算进了 else 分支 —— 配好选择器的站点会丢掉全部操作按钮。这种 bug 只能靠 jsdom 测试暴露，`node --check` 查不出来。

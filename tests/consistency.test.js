@@ -48,6 +48,30 @@ function hasExport(block, name) {
   return new RegExp("\\b" + name + "\\s*:").test(block);
 }
 
+test("popup.html / render.js 里用到的 hidden 类都真能隐藏元素", () => {
+  // 缺了对应规则，元素只是"带了个类名"，照样显示（#import-file 曾这样漏过）
+  const css = read("popup/popup.css");
+  const hasGeneric = /\.hidden\s*\{/.test(css);
+  const specific = new Set(
+    [...css.matchAll(/([^{}\n]*\.hidden)[^{}\n]*\{/g)].map((m) => m[1].trim()),
+  );
+  const offenders = [];
+  [...html.matchAll(/class="([^"]+)"/g), ...render.matchAll(/class="([^"]+)"/g)]
+    .map((m) => m[1].split(/\s+/))
+    .filter((classes) => classes.includes("hidden"))
+    .forEach((classes) => {
+      const bases = classes.filter((c) => c !== "hidden");
+      if (hasGeneric) return;
+      const covered = bases.some((cls) => specific.has("." + cls + ".hidden"));
+      if (!covered) offenders.push(classes.join("."));
+    });
+  assert.deepStrictEqual(
+    offenders,
+    [],
+    "hidden 没有对应 CSS 规则: " + offenders.join(", "),
+  );
+});
+
 test("app.js 引用的 DOM id 都存在于 popup.html", () => {
   const ids = [
     ...new Set([...app.matchAll(/getElementById\(\s*"([^"]+)"/g)].map((m) => m[1])),

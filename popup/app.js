@@ -11,6 +11,13 @@ var App = (function () {
   var editingSiteId = null;
   var shortcutBindings = {};
   var recordingShortcutId = null;
+  var actionBarHandler = null;
+  // 注入失败后重试需要还原的参数
+  var lastInjectState = null;
+  // 「自动识别」的目标：当前页面命中的站点（没有则为 null，但 pattern 已推导）
+  var repairTarget = null;
+  // 模板填值后要沿用的注入方式（普通注入 / 追加）
+  var pendingInjectMode = null;
 
   var notyf = new Notyf({
     duration: 2500,
@@ -106,6 +113,10 @@ var App = (function () {
     els.btnViewGroup = document.getElementById("btn-view-group");
     els.recentBar = document.getElementById("recent-bar");
     els.recentChips = document.getElementById("recent-chips");
+    els.actionBar = document.getElementById("action-bar");
+    els.actionBarText = document.getElementById("action-bar-text");
+    els.actionBarBtn = document.getElementById("action-bar-btn");
+    els.actionBarClose = document.getElementById("action-bar-close");
     els.btnConfirmCancel = document.getElementById("btn-confirm-cancel");
     els.btnConfirmOk = document.getElementById("btn-confirm-ok");
   }
@@ -125,6 +136,26 @@ var App = (function () {
     els.confirmMessage.textContent = message;
     els.confirmOverlay.classList.remove("hidden");
     confirmCallback = callback;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 行动条：把「死胡同」变成可点的下一步
+   * 注入失败、站点待刷新这类场景都能复用，避免用户卡在一句 toast 上。
+   * ------------------------------------------------------------------ */
+
+  function showActionBar(text, buttonLabel, handler) {
+    if (!els.actionBar) return;
+    els.actionBarText.textContent = text;
+    els.actionBarBtn.textContent = buttonLabel;
+    actionBarHandler = handler;
+    els.actionBar.classList.remove("hidden");
+    refreshIcons();
+  }
+
+  function hideActionBar() {
+    if (!els.actionBar) return;
+    els.actionBar.classList.add("hidden");
+    actionBarHandler = null;
   }
 
   function openSidePanel() {
@@ -151,7 +182,7 @@ var App = (function () {
     });
   }
 
-  // 逐个站点核对主机权限，未授权的打上「未授权」标记
+  // 逐个站点核对主机权限，未授权的打上「未授权」标记并露出授权入口
   function markUnauthorizedSites(sites) {
     if (!chrome.permissions || !chrome.permissions.contains) return;
     sites.forEach(function (site) {
@@ -161,7 +192,17 @@ var App = (function () {
         var badge = els.customSiteList.querySelector(
           '[data-site-perm="' + site.id + '"]',
         );
-        if (badge && !has) badge.classList.remove("hidden");
+        if (badge) {
+          if (has) badge.classList.add("hidden");
+          else badge.classList.remove("hidden");
+        }
+        var grantBtn = els.customSiteList.querySelector(
+          '[data-site-grant="' + site.id + '"]',
+        );
+        if (grantBtn) {
+          if (has) grantBtn.classList.add("hidden");
+          else grantBtn.classList.remove("hidden");
+        }
       });
     });
   }
@@ -383,6 +424,7 @@ var App = (function () {
     });
   }
 
+  // 新增站点后：开着该站点的标签页需要刷新，内容脚本才会注入
   function persistSite(site, isEdit, granted, detected) {
     PromptStorage.saveCustomSite(site, function () {
       resetSiteForm();
@@ -390,13 +432,63 @@ var App = (function () {
       syncSiteScripts();
       if (!granted) {
         showToast("已保存，但未授权该站点，无法自动注入", "error");
-      } else if (isEdit) {
-        showToast("站点已更新", "success");
-      } else if (detected) {
-        showToast("已添加，输入框已自动识别", "success");
-      } else {
-        showToast("已添加，访问该站点时会自动补齐输入框", "success");
+        return;
       }
+      if (isEdit) {
+        showToast("站点已更新", "success");
+        return;
+      }
+      showToast(
+        detected
+          ? "已添加，输入框已自动识别"
+          : "已添加，访问该站点时会自动补齐输入框",
+        "success",
+      );
+      suggestTabReload(site.pattern);
+    });
+  }
+
+  // 内容脚本只在页面加载时注入：找到正在访问该站点的标签页就顺手问一句
+  function suggestTabReload(pattern) {
+    if (!chrome.tabs || !chrome.tabs.query) return;
+    chrome.tabs.query({}, function (tabs) {
+      var tab = (tabs || []).find(function (t) {
+        return !!t.url && PromptUtils.patternMatchesUrl(pattern, t.url);
+      });
+      if (!tab) return;
+      showConfirm(
+        "悬浮球与页面内快捷键要刷新后才在该页面生效。现在刷新？",
+        function () {
+          try {
+            chrome.tabs.reload(tab.id);
+          } catch (e) {}
+        },
+      );
+    });
+  }
+
+  // 未授权的站点给一个补救入口，而不是让用户删掉重加
+  function grantSitePermission(siteId) {
+    PromptStorage.getCustomSites(function (sites) {
+      var site = sites.find(function (s) {
+        return s.id === siteId;
+      });
+      if (!site) return;
+      var origin = originOfPattern(site.pattern);
+      if (!origin) {
+        showToast("该站点网址无效，请重新添加", "error");
+        return;
+      }
+      requestSitePermission(origin, function (granted) {
+        if (!granted) {
+          showToast("未授予访问权限", "error");
+          return;
+        }
+        loadCustomSites();
+        syncSiteScripts();
+        showToast("已授权，刷新页面后生效", "success");
+        suggestTabReload(site.pattern);
+      });
     });
   }
 
@@ -611,67 +703,172 @@ var App = (function () {
     }
   }
 
-  function doInject(text, promptId) {
+  function doInject(text, promptId, mode) {
+    lastInjectState = { text: text, promptId: promptId, mode: mode };
     chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
       if (!tabs[0]) {
         showToast("无法获取当前标签页", "error");
         return;
       }
       var tabId = tabs[0].id;
-      chrome.tabs.sendMessage(
-        tabId,
-        { type: "inject_prompt", text: text, shouldSubmit: false },
-        function (response) {
-          if (chrome.runtime.lastError) {
-            chrome.scripting.executeScript(
-              {
-                target: { tabId: tabId },
-                files: PromptDefaults.CONTENT_SCRIPT_FILES,
-              },
-              function () {
-                if (chrome.runtime.lastError) {
-                  showToast("此页面不支持注入", "error");
+      var payload = {
+        type: "inject_prompt",
+        text: text,
+        shouldSubmit: false,
+        mode: mode || "replace",
+      };
+      chrome.tabs.sendMessage(tabId, payload, function (response) {
+        if (chrome.runtime.lastError) {
+          chrome.scripting.executeScript(
+            {
+              target: { tabId: tabId },
+              files: PromptDefaults.CONTENT_SCRIPT_FILES,
+            },
+            function () {
+              if (chrome.runtime.lastError) {
+                showToast("此页面不支持注入", "error");
+                return;
+              }
+              chrome.tabs.sendMessage(tabId, payload, function (resp) {
+                if (chrome.runtime.lastError || !resp || !resp.success) {
+                  onInjectFailure();
                   return;
                 }
-                chrome.tabs.sendMessage(
-                  tabId,
-                  { type: "inject_prompt", text: text, shouldSubmit: false },
-                  function (resp) {
-                    if (chrome.runtime.lastError || !resp || !resp.success) {
-                      showToast("注入失败，未找到输入框", "error");
-                      return;
-                    }
-                    onInjectSuccess(promptId);
-                  },
-                );
-              },
+                onInjectSuccess(promptId);
+              });
+            },
+          );
+          return;
+        }
+        if (!response || !response.success) {
+          onInjectFailure();
+          return;
+        }
+        onInjectSuccess(promptId);
+      });
+    });
+  }
+
+  // 失败不该是终点：能定位到当前页面就给出「自动识别输入框」的出口
+  function onInjectFailure() {
+    showToast("注入失败，未找到输入框", "error");
+    offerRepair();
+  }
+
+  function offerRepair() {
+    if (!chrome.scripting || !chrome.scripting.executeScript) return;
+    if (!chrome.tabs || !chrome.tabs.query) return;
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      var tab = tabs && tabs[0];
+      if (!tab || !tab.url || !/^https?:\/\//i.test(tab.url)) return;
+      PromptStorage.getCustomSites(function (sites) {
+        var matched = PromptUtils.matchSiteForUrl(sites, tab.url);
+        var pattern = matched
+          ? matched.pattern
+          : PromptUtils.deriveSitePattern(tab.url);
+        if (!pattern) return;
+        repairTarget = { pattern: pattern, site: matched || null };
+        showActionBar(
+          "没找到输入框 · " + hostOfUrl(tab.url),
+          matched ? "重新识别" : "识别此页面",
+          repairByDetection,
+        );
+      });
+    });
+  }
+
+  function hostOfUrl(url) {
+    try {
+      return new URL(url).host;
+    } catch (e) {
+      return "";
+    }
+  }
+
+  // 在当前标签页跑一遍 detector，把结果写进站点配置后重试刚才的注入
+  function repairByDetection() {
+    var target = repairTarget;
+    hideActionBar();
+    if (!target) return;
+    var origin = originOfPattern(target.pattern);
+    if (!origin) {
+      showToast("网址无法识别，请手动添加站点", "error");
+      return;
+    }
+    requestSitePermission(origin, function (granted) {
+      if (!granted) {
+        showToast("未授权该站点，无法识别输入框", "error");
+        return;
+      }
+      detectFromActiveTab(target.pattern, function (info) {
+        if (!info || !info.inputSelector) {
+          showToast("没能自动定位输入框，可在设置里手动填写", "error");
+          return;
+        }
+        saveDetectedSite(target.pattern, target.site, info, function () {
+          syncSiteScripts();
+          showToast("已识别输入框，正在重新注入", "success");
+          if (lastInjectState) {
+            doInject(
+              lastInjectState.text,
+              lastInjectState.promptId,
+              lastInjectState.mode,
             );
-            return;
           }
-          if (!response || !response.success) {
-            showToast(
-              "注入失败：" + (response ? response.error : "未找到输入框"),
-              "error",
-            );
-            return;
-          }
-          onInjectSuccess(promptId);
-        },
-      );
+        });
+      });
+    });
+  }
+
+  // 识别结果落到站点配置：已有站点则覆盖选择器（用户显式点了「重新识别」）
+  function saveDetectedSite(pattern, existing, info, done) {
+    var site = existing
+      ? Object.assign({}, existing)
+      : {
+          id: PromptUtils.generateId("site"),
+          enabled: true,
+          name: "",
+          inputSelector: "",
+          sendSelector: "",
+        };
+    site.pattern = pattern;
+    if (!site.name) {
+      site.name = (info && info.name) || PromptUtils.deriveSiteName(pattern);
+    }
+    site.inputSelector = info.inputSelector;
+    site.sendSelector = (info && info.sendSelector) || "";
+    PromptStorage.saveCustomSite(site, function () {
+      done(site);
     });
   }
 
   function onInjectSuccess(promptId) {
+    hideActionBar();
     if (promptId) {
       PromptStorage.incrementUsage(promptId);
     }
     showToast("已注入提示词", "success");
-    setTimeout(function () {
-      window.close();
-    }, 400);
+    if (isPopupWindow()) {
+      setTimeout(function () {
+        window.close();
+      }, 400);
+    }
   }
 
-  function handleInject(id) {
+  // 侧边栏里 window.close() 通常不生效，同一份代码不该在两种载体下行为不一致
+  function isPopupWindow() {
+    try {
+      return (
+        !chrome.extension ||
+        !chrome.extension.getViews ||
+        chrome.extension.getViews({ type: "popup" }).length > 0
+      );
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function handleInject(id, mode) {
     PromptStorage.getPrompts(function (prompts) {
       var prompt = prompts.find(function (p) {
         return p.id === id;
@@ -679,9 +876,10 @@ var App = (function () {
       if (!prompt) return;
 
       if (PromptUtils.hasVariables(prompt.content)) {
+        pendingInjectMode = mode;
         PromptEditor.openTemplateFill(prompt, els);
       } else {
-        doInject(prompt.content, id);
+        doInject(prompt.content, id, mode);
       }
     });
   }
@@ -720,7 +918,9 @@ var App = (function () {
 
   function handleAction(action, id) {
     if (action === "inject") {
-      handleInject(id);
+      handleInject(id, "replace");
+    } else if (action === "inject-append") {
+      handleInject(id, "append");
     } else if (action === "pin") {
       PromptStorage.togglePin(id, loadPrompts);
     } else if (action === "edit") {
@@ -762,6 +962,17 @@ var App = (function () {
   }
 
   function bindEvents() {
+    if (els.actionBarBtn) {
+      els.actionBarBtn.addEventListener("click", function () {
+        var handler = actionBarHandler;
+        hideActionBar();
+        if (handler) handler();
+      });
+    }
+    if (els.actionBarClose) {
+      els.actionBarClose.addEventListener("click", hideActionBar);
+    }
+
     els.promptList.addEventListener("click", function (e) {
       var batchCheckbox = e.target.closest(".batch-checkbox");
       if (batchCheckbox) {
@@ -772,6 +983,18 @@ var App = (function () {
           selectedIds.delete(bid);
         }
         updateBatchUI();
+        return;
+      }
+
+      // 标签已在搜索匹配里参与筛选，点一下就该把它填进搜索框
+      var tagEl = e.target.closest(".tag[data-tag]");
+      if (tagEl) {
+        var tagValue = tagEl.dataset.tag;
+        els.searchInput.value =
+          els.searchInput.value.trim() === tagValue ? "" : tagValue;
+        selectedIdx = -1;
+        loadPrompts();
+        els.searchInput.focus();
         return;
       }
 
@@ -917,7 +1140,8 @@ var App = (function () {
 
     els.btnTemplateInject.addEventListener("click", function () {
       PromptEditor.injectTemplate(els, function (filled, promptId) {
-        doInject(filled, promptId);
+        doInject(filled, promptId, pendingInjectMode || "replace");
+        pendingInjectMode = null;
       });
     });
 
@@ -991,6 +1215,12 @@ var App = (function () {
     });
 
     els.customSiteList.addEventListener("click", function (e) {
+      var grantButton = e.target.closest("[data-site-grant]");
+      if (grantButton) {
+        grantSitePermission(grantButton.dataset.siteGrant);
+        return;
+      }
+
       var editButton = e.target.closest("[data-site-edit]");
       if (editButton) {
         var editId = editButton.dataset.siteEdit;

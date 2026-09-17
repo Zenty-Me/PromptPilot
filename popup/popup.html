@@ -39,6 +39,15 @@
         <div id="recent-chips" class="recent-chips"></div>
       </div>
 
+      <div id="action-bar" class="action-bar hidden">
+        <i class="action-bar-icon" data-lucide="wand-sparkles"></i>
+        <span id="action-bar-text"></span>
+        <div class="action-bar-actions">
+          <button id="action-bar-btn" class="btn btn-small btn-primary"></button>
+          <button id="action-bar-close" class="btn-icon-sm" title="忽略"><i data-lucide="x"></i></button>
+        </div>
+      </div>
+
       <div id="prompt-list" class="prompt-list"></div>
 
       <div id="empty-state" class="empty-state">
@@ -216,6 +225,7 @@
 
       <div id="context-menu" class="context-menu hidden">
         <button class="ctx-item" data-action="inject"><i data-lucide="send"></i> 注入</button>
+        <button class="ctx-item" data-action="inject-append"><i data-lucide="text-cursor-input"></i> 追加到现有内容</button>
         <button class="ctx-item" data-action="edit"><i data-lucide="pencil"></i> 编辑</button>
         <button class="ctx-item" data-action="copy"><i data-lucide="clipboard-copy"></i> 复制内容</button>
         <button class="ctx-item" data-action="duplicate"><i data-lucide="copy-plus"></i> 创建副本</button>

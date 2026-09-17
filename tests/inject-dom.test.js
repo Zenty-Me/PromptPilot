@@ -57,6 +57,49 @@ function createEnv(options) {
 
 const URL_A = "https://chat.example.com/room/123";
 
+test("replace 模式（默认）覆盖输入框原有内容", () => {
+  const win = createEnv({
+    url: URL_A,
+    sites: [
+      { id: "s1", name: "A", pattern: "https://chat.example.com/*", inputSelector: "#custom-input", enabled: true },
+    ],
+  });
+  const input = win.document.getElementById("custom-input");
+  input.value = "原来写了一半的话";
+  const result = win.PromptInjector.injectPromptToPage("新的提示词", false);
+  assert.strictEqual(result.success, true);
+  assert.strictEqual(input.value, "新的提示词");
+});
+
+test("append 模式把内容追加到原有内容之后", () => {
+  const win = createEnv({
+    url: URL_A,
+    sites: [
+      { id: "s1", name: "A", pattern: "https://chat.example.com/*", inputSelector: "#custom-input", enabled: true },
+    ],
+  });
+  const input = win.document.getElementById("custom-input");
+  input.value = "原来写了一半的话";
+  const result = win.PromptInjector.injectPromptToPage("补充一段", false, {
+    mode: "append",
+  });
+  assert.strictEqual(result.success, true);
+  assert.strictEqual(input.value, "原来写了一半的话\n补充一段");
+});
+
+test("未知 mode 一律按 replace 处理", () => {
+  const win = createEnv({
+    url: URL_A,
+    sites: [
+      { id: "s1", name: "A", pattern: "https://chat.example.com/*", inputSelector: "#custom-input", enabled: true },
+    ],
+  });
+  const input = win.document.getElementById("custom-input");
+  input.value = "旧内容";
+  win.PromptInjector.injectPromptToPage("新内容", false, { mode: "whatever" });
+  assert.strictEqual(input.value, "新内容");
+});
+
 test("命中当前网址的自定义站点", () => {
   const win = createEnv({
     url: URL_A,

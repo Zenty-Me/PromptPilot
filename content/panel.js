@@ -3,8 +3,12 @@ var PromptPanel = (function () {
   var ballStyleEl = null;
   var currentPanelCat = "all";
   var currentPanelTemplatePrompt = null;
+  var currentPanelTemplateMode = "replace";
   var ballEl = null;
   var panelEl = null;
+  // 悬浮球的位置以 right/bottom 为准（不随窗口尺寸变化），球体坐标由它推导
+  var ballPos = null;
+  var ballResizeBound = false;
   // 直径定义在 content/panel-styles.js（CSS 与 JS 定位必须同源）
   var BALL_SIZE = PP_BALL_SIZE;
   var BALL_STORAGE_KEY = "ppBallPos";
@@ -107,17 +111,41 @@ var PromptPanel = (function () {
     (document.body || document.documentElement).appendChild(ball);
     ballEl = ball;
     refreshPanelIcons();
-    ball.style.left = Math.max(0, window.innerWidth - BALL_SIZE - 20) + "px";
-    ball.style.top = Math.max(0, window.innerHeight - BALL_SIZE - 80) + "px";
+    applyBallPos(ball, { right: 20, bottom: 80 });
 
     loadPosition(BALL_STORAGE_KEY, { right: 20, bottom: 80 }, function (pos) {
-      var r = clamp(pos.right, 0, window.innerWidth - BALL_SIZE);
-      var b = clamp(pos.bottom, 0, window.innerHeight - BALL_SIZE);
-      ball.style.left = window.innerWidth - r - BALL_SIZE + "px";
-      ball.style.top = window.innerHeight - b - BALL_SIZE + "px";
+      applyBallPos(ball, pos);
     });
 
     bindBallEvents(ball);
+    bindBallResize();
+  }
+
+  // right/bottom 记的是「离视口右下角的距离」；窗口变小后必须重新夹取，
+  // 否则球会停在视口外，用户再也点不到。夹取作用在最终的 left/top 上，
+  // 再反推回 right/bottom，这样极端窄窗（比球还小）也不会算出负坐标。
+  function applyBallPos(ball, pos) {
+    if (!ball) return;
+    var maxLeft = Math.max(0, window.innerWidth - BALL_SIZE);
+    var maxTop = Math.max(0, window.innerHeight - BALL_SIZE);
+    var left = clamp(window.innerWidth - pos.right - BALL_SIZE, 0, maxLeft);
+    var top = clamp(window.innerHeight - pos.bottom - BALL_SIZE, 0, maxTop);
+    ballPos = {
+      right: window.innerWidth - left - BALL_SIZE,
+      bottom: window.innerHeight - top - BALL_SIZE,
+    };
+    if (ball.classList.contains("pp-ball-dragging")) return;
+    ball.style.left = left + "px";
+    ball.style.top = top + "px";
+  }
+
+  function bindBallResize() {
+    if (ballResizeBound) return;
+    ballResizeBound = true;
+    window.addEventListener("resize", function () {
+      if (!ballEl || !ballPos) return;
+      applyBallPos(ballEl, ballPos);
+    });
   }
 
   function removeBall() {
@@ -188,7 +216,7 @@ var PromptPanel = (function () {
       ball.classList.remove("pp-ball-dragging");
       var rect = ball.getBoundingClientRect();
       ball.style.transform = "";
-      savePosition(BALL_STORAGE_KEY, {
+      persistBallPos({
         right: Math.round(
           clamp(
             window.innerWidth - rect.right,
@@ -226,11 +254,18 @@ var PromptPanel = (function () {
     setTimeout(function () {
       ball.style.transition = "";
       var finalRect = ball.getBoundingClientRect();
-      savePosition(BALL_STORAGE_KEY, {
+      persistBallPos({
         right: Math.round(window.innerWidth - finalRect.right),
         bottom: Math.round(window.innerHeight - finalRect.bottom),
       });
     }, 260);
+  }
+
+  // 记忆并落盘：resize 时靠 ballPos 重新夹取，不再回读 storage
+  function persistBallPos(pos) {
+    if (!ballEl) return;
+    applyBallPos(ballEl, pos);
+    savePosition(BALL_STORAGE_KEY, ballPos);
   }
 
   function togglePanel() {
@@ -688,18 +723,18 @@ var PromptPanel = (function () {
               var idx = parseInt(item.dataset.index);
               var prompt = filtered[idx];
               if (!prompt) return;
+              // Alt + 点击 = 追加到输入框已有内容之后（多轮对话补一段）
+              var mode = e.altKey ? "append" : "replace";
 
               if (PromptUtils.hasVariables(prompt.content)) {
-                openPanelTemplate(prompt);
+                openPanelTemplate(prompt, mode);
               } else {
-                var result = PromptInjector.injectPromptToPage(
-                  prompt.content,
-                  false,
-                );
-                if (result.success) {
-                  incrementPanelUsage(prompt.id);
-                  closePanel();
-                }
+                injectFromPanel({
+                  text: prompt.content,
+                  promptId: prompt.id,
+                  title: prompt.title,
+                  mode: mode,
+                });
               }
             },
             true,
@@ -709,8 +744,9 @@ var PromptPanel = (function () {
     );
   }
 
-  function openPanelTemplate(prompt) {
+  function openPanelTemplate(prompt, mode) {
     currentPanelTemplatePrompt = prompt;
+    currentPanelTemplateMode = mode || "replace";
     var variables = PromptUtils.extractVariables(prompt.content);
     var fieldsEl = document.getElementById("pi-tpl-fields");
     if (!fieldsEl) return;
@@ -771,6 +807,7 @@ var PromptPanel = (function () {
     var dialog = document.getElementById("pi-template-dialog");
     if (dialog) dialog.classList.add("hidden");
     currentPanelTemplatePrompt = null;
+    currentPanelTemplateMode = "replace";
   }
 
   function injectPanelTemplate() {
@@ -785,11 +822,12 @@ var PromptPanel = (function () {
       currentPanelTemplatePrompt.content,
       values,
     );
-    var result = PromptInjector.injectPromptToPage(filled, false);
-    if (result.success) {
-      incrementPanelUsage(currentPanelTemplatePrompt.id);
-      closePanel();
-    }
+    injectFromPanel({
+      text: filled,
+      promptId: currentPanelTemplatePrompt.id,
+      title: currentPanelTemplatePrompt.title,
+      mode: currentPanelTemplateMode,
+    });
   }
 
   function closePanel() {
@@ -803,6 +841,105 @@ var PromptPanel = (function () {
       p.remove();
     }
     panelEl = null;
+  }
+
+  // 统一的面板注入入口：失败时先就地重定位输入框再重试，仍是失败才收尾提示
+  function injectFromPanel(params, alreadyRelocated) {
+    var result = null;
+    try {
+      result = PromptInjector.injectPromptToPage(params.text, false, {
+        mode: params.mode,
+      });
+    } catch (e) {
+      result = null;
+    }
+    if (result && result.success) {
+      if (params.promptId) incrementPanelUsage(params.promptId);
+      showNotice(
+        (params.mode === "append" ? "已追加「" : "已注入「") +
+          (params.title || "内容") +
+          "」",
+      );
+      closePanel();
+      return;
+    }
+    if (!alreadyRelocated && relocateAndRetry(params)) {
+      showNotice("正在识别输入框…");
+      return;
+    }
+    showNotice("注入失败：" + ((result && result.error) || "未找到输入框"));
+  }
+
+  // 优先更新真正命中当前网址的站点，避免生成一条几乎重复的新规则
+  function relocateAndRetry(params) {
+    if (typeof PromptDetector === "undefined" || !PromptDetector.detect)
+      return false;
+    var info = null;
+    try {
+      info = PromptDetector.detect();
+    } catch (e) {
+      info = null;
+    }
+    if (!info || !info.inputSelector) return false;
+
+    try {
+      chrome.storage.local.get({ customSites: [] }, function (data) {
+        var sites = data.customSites || [];
+        var matched = PromptUtils.matchSiteForUrl(sites, window.location.href);
+        var pattern = matched
+          ? matched.pattern
+          : PromptUtils.deriveSitePattern(window.location.href);
+        if (!pattern) return;
+        saveDetectedSite(pattern, matched, info, function () {
+          // 站点配置靠 storage 事件回流到 inject 的缓存里，稍等一拍再重试
+          setTimeout(function () {
+            injectFromPanel(params, true);
+          }, 80);
+        });
+      });
+    } catch (e) {
+      return false;
+    }
+    return true;
+  }
+
+  function saveDetectedSite(pattern, existing, info, done) {
+    try {
+      chrome.storage.local.get({ customSites: [] }, function (data) {
+        var sites = data.customSites || [];
+        var index = existing
+          ? sites.findIndex(function (s) {
+              return s.id === existing.id;
+            })
+          : -1;
+        var site =
+          index !== -1
+            ? Object.assign({}, sites[index])
+            : {
+                id: PromptUtils.generateId("site"),
+                enabled: true,
+                name: "",
+                inputSelector: "",
+                sendSelector: "",
+              };
+        site.pattern = pattern;
+        if (!site.name) {
+          site.name = (info && info.name) || PromptUtils.deriveSiteName(pattern);
+        }
+        site.inputSelector = info.inputSelector;
+        site.sendSelector = (info && info.sendSelector) || "";
+        site.detectedAt = Date.now();
+
+        var next = sites.slice();
+        if (index !== -1) next[index] = site;
+        else next.push(site);
+        chrome.storage.local.set({ customSites: next }, function () {
+          if (done) done();
+        });
+      });
+    } catch (e) {
+      if (done) done();
+    }
   }
 
   function incrementPanelUsage(id) {
@@ -842,13 +979,12 @@ var PromptPanel = (function () {
           openPanelTemplate(prompt);
           return;
         }
-        var result = PromptInjector.injectPromptToPage(prompt.content, false);
-        if (result && result.success) {
-          incrementPanelUsage(prompt.id);
-          showNotice("已注入「" + prompt.title + "」");
-        } else {
-          showNotice("注入失败：" + ((result && result.error) || "未找到输入框"));
-        }
+        injectFromPanel({
+          text: prompt.content,
+          promptId: prompt.id,
+          title: prompt.title,
+          mode: "replace",
+        });
       });
     } catch (e) {
       showNotice("注入失败");
@@ -879,6 +1015,7 @@ var PromptPanel = (function () {
           var result = PromptInjector.injectPromptToPage(
             message.text,
             message.shouldSubmit || false,
+            { mode: message.mode },
           );
           sendResponse(result);
         } else if (message.type === "toggle_panel") {

@@ -157,6 +157,58 @@ var PromptUtils = (function () {
     return label.charAt(0).toUpperCase() + label.slice(1);
   }
 
+  // match pattern 是否命中某条网址（支持 * 通配；pattern 末尾的 /* 覆盖整段路径）
+  function patternMatchesUrl(pattern, url) {
+    var left = String(pattern || "").trim();
+    var right = String(url || "").trim();
+    if (!left || !right) return false;
+    var leftParts = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)(\/.*)?$/i.exec(left);
+    var rightParts = /^([a-z][a-z0-9+.-]*):\/\/([^/?#]+)(\/[^?#]*)?/i.exec(right);
+    if (!leftParts || !rightParts) return false;
+    if (leftParts[1].toLowerCase() !== rightParts[1].toLowerCase()) return false;
+    if (!hostMatches(leftParts[2], rightParts[2])) return false;
+    var leftPath = leftParts[3] || "/";
+    var rightPath = rightParts[3] || "/";
+    // Chrome 的 match pattern 里 "/foo/*" 命中 "/foo" 本身及其下所有路径
+    if (leftPath === "/*" || leftPath === "*") return true;
+    if (leftPath.slice(-2) === "/*") {
+      leftPath = leftPath.slice(0, -1); // "/foo/*" → "/foo/"，同时覆盖 "/foo" 与 "/foo/bar"
+    }
+    return (
+      rightPath === leftPath ||
+      rightPath === leftPath.slice(0, -1) ||
+      rightPath.indexOf(leftPath) === 0
+    );
+  }
+
+  // 端口不参与比较：内容脚本一侧一直是按 hostname 匹配的，两边规则必须一致
+  function hostMatches(patternHost, host) {
+    if (patternHost === "*") return true;
+    var target = host.split(":")[0];
+    if (patternHost.slice(0, 2) === "*.") {
+      var suffix = patternHost.slice(1); // ".example.com"
+      var base = patternHost.slice(2);
+      return target === base || target.slice(target.length - suffix.length) === suffix;
+    }
+    return patternHost.toLowerCase() === target.toLowerCase();
+  }
+
+  // 从自定义站点里挑出命中最具体（pattern 最长）且启用的那条；无命中返回 null
+  function matchSiteForUrl(sites, url) {
+    var best = null;
+    var bestLength = -1;
+    (sites || []).forEach(function (site) {
+      if (!site || site.enabled === false) return;
+      if (!patternMatchesUrl(site.pattern, url)) return;
+      var length = String(site.pattern || "").length;
+      if (length > bestLength) {
+        bestLength = length;
+        best = site;
+      }
+    });
+    return best;
+  }
+
   /* ------------------------------------------------------------------ *
    * 快捷键工具
    * 组合键统一序列化为小写字符串："ctrl+shift+p"
@@ -372,6 +424,8 @@ var PromptUtils = (function () {
     deriveSiteName: deriveSiteName,
     isValidMatchPattern: isValidMatchPattern,
     originOfPattern: originOfPattern,
+    patternMatchesUrl: patternMatchesUrl,
+    matchSiteForUrl: matchSiteForUrl,
     parseShortcut: parseShortcut,
     serializeShortcut: serializeShortcut,
     shortcutHasModifier: shortcutHasModifier,
