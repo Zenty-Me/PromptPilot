@@ -146,7 +146,7 @@ var PromptRender = (function () {
       '<i data-lucide="pin"></i>' +
       "</button>" +
       '<button class="btn-small btn-edit" data-action="edit" title="编辑"><i data-lucide="pencil"></i></button>' +
-      '<button class="btn-small btn-duplicate" data-action="duplicate" title="复制"><i data-lucide="copy"></i></button>' +
+      '<button class="btn-small btn-copy" data-action="copy" title="复制到剪贴板"><i data-lucide="clipboard-copy"></i></button>' +
       '<button class="btn-small btn-delete" data-action="delete" title="删除"><i data-lucide="trash-2"></i></button>' +
       "</div>" +
       "</div>"
@@ -410,13 +410,15 @@ var PromptRender = (function () {
           '<span class="site-pattern">' +
           escapeHtml(site.pattern) +
           "</span>" +
-          '<span class="site-selectors">输入框 <code>' +
-          escapeHtml(site.inputSelector || "") +
-          "</code>" +
-          (site.sendSelector
-            ? ' · 发送 <code>' + escapeHtml(site.sendSelector) + "</code>"
-            : "") +
-          "</span>" +
+          site.inputSelector
+            ? '<span class="site-selectors">输入框 <code>' +
+              escapeHtml(site.inputSelector) +
+              "</code>" +
+              (site.sendSelector
+                ? ' · 发送 <code>' + escapeHtml(site.sendSelector) + "</code>"
+                : "") +
+              "</span>"
+            : '<span class="site-selectors site-selectors-pending">输入框待识别 · 访问该站点后自动补全</span>' +
           '<span class="site-perm-badge hidden" data-site-perm="' +
           site.id +
           '">未授权</span>' +

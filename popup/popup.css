@@ -568,7 +568,7 @@ svg[data-lucide] {
   color: var(--accent);
 }
 
-.btn-small.btn-duplicate:hover {
+.btn-small.btn-copy:hover {
   color: var(--violet);
 }
 
@@ -1285,6 +1285,10 @@ svg[data-lucide] {
   gap: 4px;
 }
 
+.custom-site-info .site-selectors-pending {
+  color: var(--text-dim);
+}
+
 .custom-site-info .site-selectors code {
   font-family: var(--font-mono);
   font-size: var(--fs-xs);
@@ -1423,6 +1427,61 @@ svg[data-lucide] {
 .custom-site-form input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 主路径：只填网址 */
+.site-quick-add {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.site-quick-add input {
+  flex: 1;
+}
+
+.site-quick-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+}
+
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: var(--fs-xs);
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--dur);
+}
+
+.link-btn i[data-lucide],
+.link-btn svg {
+  width: 11px;
+  height: 11px;
+}
+
+.link-btn:hover {
+  color: var(--accent);
+}
+
+/* 细节 / 编辑入口：平时收起来 */
+.site-advanced {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.site-advanced.hidden {
+  display: none;
 }
 
 .custom-site-form-actions {

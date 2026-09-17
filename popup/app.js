@@ -67,6 +67,12 @@ var App = (function () {
     els.settingsSort = document.getElementById("settings-sort");
     els.categoryList = document.getElementById("category-list");
     els.customSiteList = document.getElementById("custom-site-list");
+    els.customSiteUrl = document.getElementById("custom-site-url");
+    els.btnUseCurrentSite = document.getElementById("btn-use-current-site");
+    els.btnToggleSiteAdvanced = document.getElementById(
+      "btn-toggle-site-advanced",
+    );
+    els.siteAdvanced = document.getElementById("custom-site-advanced");
     els.customSiteName = document.getElementById("custom-site-name");
     els.customSitePattern = document.getElementById("custom-site-pattern");
     els.customSiteInput = document.getElementById("custom-site-input");
@@ -272,17 +278,20 @@ var App = (function () {
 
   function resetSiteForm() {
     editingSiteId = null;
+    els.customSiteUrl.value = "";
     els.customSiteName.value = "";
     els.customSitePattern.value = "";
     els.customSiteInput.value = "";
     els.customSiteSend.value = "";
     els.btnAddCustomSite.textContent = "添加";
     els.btnCancelEditSite.classList.add("hidden");
+    els.siteAdvanced.classList.add("hidden");
     if (els.siteFormTitle) els.siteFormTitle.textContent = "添加站点";
   }
 
   function fillSiteForm(site) {
     editingSiteId = site.id;
+    els.customSiteUrl.value = site.pattern || "";
     els.customSiteName.value = site.name || "";
     els.customSitePattern.value = site.pattern || "";
     els.customSiteInput.value = site.inputSelector || "";
@@ -290,7 +299,17 @@ var App = (function () {
     els.btnAddCustomSite.textContent = "保存";
     els.btnCancelEditSite.classList.remove("hidden");
     if (els.siteFormTitle) els.siteFormTitle.textContent = "编辑站点";
+    els.siteAdvanced.classList.remove("hidden");
     els.customSiteName.focus();
+  }
+
+  // 高级面板展开后就是用户在手动控制，别再自动覆盖他填的值
+  function syncDerivedFields() {
+    if (!els.siteAdvanced.classList.contains("hidden")) return;
+    var raw = els.customSiteUrl.value.trim();
+    var derived = PromptUtils.deriveSitePattern(raw);
+    els.customSitePattern.value = derived;
+    els.customSiteName.value = derived ? PromptUtils.deriveSiteName(raw) : "";
   }
 
   // 权限是脚本能否注入的前提：未授权时保存但标注，避免用户以为功能坏了
@@ -322,14 +341,82 @@ var App = (function () {
     } catch (e) {}
   }
 
-  function submitCustomSite() {
+  function sameOrigin(url, pattern) {
+    var urlOrigin = url ? PromptUtils.originOfPattern(url) : "";
+    var target = PromptUtils.originOfPattern(pattern);
+    return !!urlOrigin && !!target && urlOrigin === target;
+  }
+
+  // 网址正好在活动标签页开着时，直接在该页面跑一遍识别，省得用户再刷新一次
+  function detectFromActiveTab(pattern, callback) {
+    if (!chrome.scripting || !chrome.scripting.executeScript) {
+      callback(null);
+      return;
+    }
+    chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+      var tab = tabs && tabs[0];
+      if (!tab || !tab.id || !sameOrigin(tab.url, pattern)) {
+        callback(null);
+        return;
+      }
+      chrome.scripting.executeScript(
+        { target: { tabId: tab.id }, files: ["shared/detector.js"] },
+        function () {
+          if (chrome.runtime.lastError) {
+            callback(null);
+            return;
+          }
+          chrome.scripting.executeScript(
+            {
+              target: { tabId: tab.id },
+              func: function () {
+                return window.PromptDetector ? PromptDetector.detect() : null;
+              },
+            },
+            function (results) {
+              void chrome.runtime.lastError;
+              callback((results && results[0]) || null);
+            },
+          );
+        },
+      );
+    });
+  }
+
+  function persistSite(site, isEdit, granted, detected) {
+    PromptStorage.saveCustomSite(site, function () {
+      resetSiteForm();
+      loadCustomSites();
+      syncSiteScripts();
+      if (!granted) {
+        showToast("已保存，但未授权该站点，无法自动注入", "error");
+      } else if (isEdit) {
+        showToast("站点已更新", "success");
+      } else if (detected) {
+        showToast("已添加，输入框已自动识别", "success");
+      } else {
+        showToast("已添加，访问该站点时会自动补齐输入框", "success");
+      }
+    });
+  }
+
+  function siteFromFields(existing) {
+    return {
+      id: existing ? existing.id : PromptUtils.generateId("site"),
+      name: els.customSiteName.value.trim(),
+      pattern: els.customSitePattern.value.trim(),
+      inputSelector: els.customSiteInput.value.trim(),
+      sendSelector: els.customSiteSend.value.trim(),
+      enabled: existing ? existing.enabled !== false : true,
+    };
+  }
+
+  // 手动 / 编辑路径：直接用表单里的值
+  function submitSiteFromFields() {
     var name = els.customSiteName.value.trim();
     var pattern = els.customSitePattern.value.trim();
-    var inputSelector = els.customSiteInput.value.trim();
-    var sendSelector = els.customSiteSend.value.trim();
-
-    if (!name || !pattern || !inputSelector) {
-      showToast("请填写站点名称、网址和输入框选择器", "error");
+    if (!name || !pattern) {
+      showToast("请填写站点名称和匹配网址", "error");
       return;
     }
     var origin = originOfPattern(pattern);
@@ -345,29 +432,79 @@ var App = (function () {
             return s.id === editingSiteId;
           })
         : null;
-
-      var site = {
-        id: existing ? existing.id : PromptUtils.generateId("site"),
-        name: name,
-        pattern: pattern,
-        inputSelector: inputSelector,
-        sendSelector: sendSelector,
-        enabled: existing ? existing.enabled !== false : true,
-      };
-
+      var site = siteFromFields(existing);
       requestSitePermission(origin, function (granted) {
-        PromptStorage.saveCustomSite(site, function () {
-          resetSiteForm();
-          loadCustomSites();
-          syncSiteScripts();
-          if (!granted) {
-            showToast("已保存，但未授权该站点，无法自动注入", "error");
-          } else {
-            showToast(isEdit ? "站点已更新" : "站点已添加", "success");
+        persistSite(site, isEdit, granted, false);
+      });
+    });
+  }
+
+  // 智能路径：只给网址，其余都推导 + 探测
+  function submitSiteByUrl() {
+    var url = els.customSiteUrl.value.trim();
+    if (!url) {
+      showToast("请输入站点网址", "error");
+      return;
+    }
+    var pattern =
+      els.customSitePattern.value.trim() ||
+      PromptUtils.deriveSitePattern(url);
+    if (!pattern) {
+      showToast("网址格式不正确，需形如 https://example.com", "error");
+      return;
+    }
+    var origin = originOfPattern(pattern);
+    if (!origin) {
+      showToast("网址格式不正确，需形如 https://example.com", "error");
+      return;
+    }
+    syncDerivedFields();
+
+    PromptStorage.getCustomSites(function (sites) {
+      var existing = sites.find(function (s) {
+        return s.pattern === pattern;
+      });
+      requestSitePermission(origin, function (granted) {
+        detectFromActiveTab(pattern, function (info) {
+          var site = existing
+            ? Object.assign({}, existing)
+            : {
+                id: PromptUtils.generateId("site"),
+                enabled: true,
+                inputSelector: "",
+                sendSelector: "",
+                name: "",
+              };
+          site.pattern = pattern;
+          if (!site.name) {
+            site.name =
+              (info && info.name) ||
+              els.customSiteName.value.trim() ||
+              PromptUtils.deriveSiteName(url);
           }
+          if (!site.inputSelector && info && info.inputSelector) {
+            site.inputSelector = info.inputSelector;
+            site.sendSelector = info.sendSelector || "";
+          }
+          persistSite(site, !!existing, granted, !!info && !!info.inputSelector);
         });
       });
     });
+  }
+
+  function submitCustomSite() {
+    if (editingSiteId) {
+      submitSiteFromFields();
+      return;
+    }
+    var manual =
+      els.customSiteUrl.value.trim() === "" &&
+      !els.siteAdvanced.classList.contains("hidden");
+    if (manual) {
+      submitSiteFromFields();
+      return;
+    }
+    submitSiteByUrl();
   }
   function closeConfirm() {
     els.confirmOverlay.classList.add("hidden");
@@ -549,6 +686,38 @@ var App = (function () {
     });
   }
 
+  function copyTextToClipboard(text, callback) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(
+        function () {
+          callback(true);
+        },
+        function () {
+          callback(fallbackCopy(text));
+        },
+      );
+      return;
+    }
+    callback(fallbackCopy(text));
+  }
+
+  function fallbackCopy(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (err) {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
   function handleAction(action, id) {
     if (action === "inject") {
       handleInject(id);
@@ -565,9 +734,19 @@ var App = (function () {
           });
         }
       });
+    } else if (action === "copy") {
+      PromptStorage.getPrompts(function (prompts) {
+        var prompt = prompts.find(function (p) {
+          return p.id === id;
+        });
+        if (!prompt) return;
+        copyTextToClipboard(prompt.content, function (ok) {
+          showToast(ok ? "已复制到剪贴板" : "复制失败", ok ? "success" : "error");
+        });
+      });
     } else if (action === "duplicate") {
       PromptStorage.duplicatePrompt(id, function () {
-        showToast("已复制提示词", "success");
+        showToast("已创建副本", "success");
         loadPrompts();
       });
       refreshIcons();
@@ -765,6 +944,35 @@ var App = (function () {
     });
 
     els.btnAddCustomSite.addEventListener("click", submitCustomSite);
+
+    els.customSiteUrl.addEventListener("input", syncDerivedFields);
+
+    els.customSiteUrl.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        submitCustomSite();
+      }
+    });
+
+    els.btnUseCurrentSite.addEventListener("click", function () {
+      if (!chrome.tabs || !chrome.tabs.query) {
+        showToast("当前环境不支持读取标签页", "error");
+        return;
+      }
+      chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+        var tab = tabs && tabs[0];
+        if (!tab || !tab.url || !/^https?:\/\//i.test(tab.url)) {
+          showToast("当前标签页不是网页地址", "error");
+          return;
+        }
+        els.customSiteUrl.value = tab.url;
+        syncDerivedFields();
+      });
+    });
+
+    els.btnToggleSiteAdvanced.addEventListener("click", function () {
+      els.siteAdvanced.classList.toggle("hidden");
+    });
 
     els.btnCancelEditSite.addEventListener("click", function () {
       resetSiteForm();

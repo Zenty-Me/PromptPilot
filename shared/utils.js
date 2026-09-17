@@ -107,6 +107,56 @@ var PromptUtils = (function () {
     return scheme + "://" + matched[2] + "/*";
   }
 
+  // 用户输入的一条网址 -> 站点匹配规则：只保留首段路径，避免会话 ID 之类的深层把自己锁死
+  function deriveSitePattern(input) {
+    var value = normalizeMatchPattern(input);
+    if (!value) return "";
+    var matched = /^([a-z][a-z0-9+.-]*:\/\/[^/]+)(\/.*)?$/i.exec(value);
+    if (!matched) return "";
+    var base = matched[1];
+    var path = (matched[2] || "/").replace(/\/+$/, "");
+    if (!path || path === "/*") return base + "/*";
+    var firstSegment = path.split("/").filter(Boolean)[0];
+    return firstSegment ? base + "/" + firstSegment + "/*" : base + "/*";
+  }
+
+  // 常见两段后缀，避免 example.com.cn 取成 "Com"
+  var MULTI_PART_TLDS = [
+    "co.jp",
+    "ne.jp",
+    "or.jp",
+    "co.uk",
+    "co.kr",
+    "co.nz",
+    "com.au",
+    "com.br",
+    "com.cn",
+    "net.cn",
+    "org.cn",
+    "gov.cn",
+    "edu.cn",
+    "com.hk",
+    "com.tw",
+    "com.sg",
+  ];
+
+  // 用户输入的一条网址 -> 站点名称，取主域名部分并首字母大写
+  function deriveSiteName(input) {
+    var value = normalizeMatchPattern(input);
+    if (!value) return "";
+    var matched = /^[a-z][a-z0-9+.-]*:\/\/([^/:?#]+)/i.exec(value);
+    if (!matched) return "";
+    var host = matched[1].replace(/^www\./i, "");
+    var labels = host.split(".").filter(Boolean);
+    if (!labels.length) return host;
+    var lastTwo = labels.slice(-2).join(".").toLowerCase();
+    var label =
+      labels.length >= 3 && MULTI_PART_TLDS.indexOf(lastTwo) !== -1
+        ? labels[labels.length - 3]
+        : labels[labels.length - 2] || labels[0];
+    return label.charAt(0).toUpperCase() + label.slice(1);
+  }
+
   /* ------------------------------------------------------------------ *
    * 快捷键工具
    * 组合键统一序列化为小写字符串："ctrl+shift+p"
@@ -318,6 +368,8 @@ var PromptUtils = (function () {
     escapeHtml: escapeHtml,
     generateId: generateId,
     normalizeMatchPattern: normalizeMatchPattern,
+    deriveSitePattern: deriveSitePattern,
+    deriveSiteName: deriveSiteName,
     isValidMatchPattern: isValidMatchPattern,
     originOfPattern: originOfPattern,
     parseShortcut: parseShortcut,

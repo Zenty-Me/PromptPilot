@@ -53,13 +53,59 @@ var PromptInjector = (function () {
     ],
   };
 
+  /* 站点被加进来但没有输入框选择器时，趁用户访问页面自动补全 */
+  var AUTO_DETECT_DELAYS = [800, 2500, 5000];
+
+  function pendingDetectSite() {
+    var site = getCustomSite();
+    return site && !String(site.inputSelector || "").trim() ? site : null;
+  }
+
+  function autoDetectOnce() {
+    var site = pendingDetectSite();
+    if (!site || typeof PromptDetector === "undefined") return false;
+    var info = PromptDetector.detect();
+    if (!info || !info.inputSelector) return false;
+
+    try {
+      chrome.storage.local.get({ customSites: [] }, function (data) {
+        var sites = data.customSites || [];
+        var index = sites.findIndex(function (item) {
+          return item.id === site.id;
+        });
+        if (index === -1) return;
+        // 用户已经手动填过，或上一次探测已写入，都不再覆盖
+        if (String(sites[index].inputSelector || "").trim()) return;
+        sites[index].inputSelector = info.inputSelector;
+        if (info.sendSelector) sites[index].sendSelector = info.sendSelector;
+        if (!sites[index].name && info.name) sites[index].name = info.name;
+        sites[index].detectedAt = Date.now();
+        chrome.storage.local.set({ customSites: sites }, function () {
+          void chrome.runtime.lastError;
+        });
+      });
+    } catch (e) {}
+    return true;
+  }
+
+  // SPA 输入框常常晚于 document_idle 出现，所以重试几次再放弃
+  function scheduleAutoDetect() {
+    if (typeof PromptDetector === "undefined") return;
+    if (!pendingDetectSite()) return;
+    AUTO_DETECT_DELAYS.forEach(function (delay) {
+      setTimeout(autoDetectOnce, delay);
+    });
+  }
+
   try {
     chrome.storage.local.get({ customSites: [] }, function (data) {
       customSites = data.customSites || [];
+      scheduleAutoDetect();
     });
     chrome.storage.onChanged.addListener(function (changes, areaName) {
       if (areaName === "local" && changes.customSites) {
         customSites = changes.customSites.newValue || [];
+        scheduleAutoDetect();
       }
     });
   } catch (e) {}
@@ -333,5 +379,6 @@ var PromptInjector = (function () {
     simulateEnter: simulateEnter,
     submitCurrent: submitCurrent,
     getCustomSite: getCustomSite,
+    autoDetectOnce: autoDetectOnce,
   };
 })();

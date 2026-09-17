@@ -10,6 +10,7 @@ Chrome extension (Manifest V3), vanilla JS. One-way injects prompts into web-AI 
   - `tests/consistency.test.js` — static cross-file contract check (DOM ids, `data-*` producers/consumers, message types, cross-module exports, manifest vs `CONTENT_SCRIPT_FILES`).
   - `tests/shortcuts-dom.test.js` — `content/shortcuts.js` dispatch behaviour driven by real jsdom `KeyboardEvent`s.
   - `tests/inject-dom.test.js` — custom-site matching, `enabled` filtering, selector precedence.
+  - `tests/detector-dom.test.js` — `shared/detector.js` selector generation / input & send detection, plus `content/inject.js` writing detected selectors back to storage.
   - `dragtest.js` — jsdom check of the Draggabilly drag stack.
 - `node --check <file>` still catches syntax errors, but is not sufficient on its own.
 - After editing any source file, **reload the extension** at `chrome://extensions` for changes to take effect.
@@ -35,6 +36,13 @@ Chrome extension (Manifest V3), vanilla JS. One-way injects prompts into web-AI 
 - URL normalization lives in one place (`PromptUtils.normalizeMatchPattern` / `isValidMatchPattern` / `originOfPattern`). background and popup must both call it, otherwise "popup granted permission but background thinks the pattern is invalid".
 - Newly registered scripts load on the **next page load/refresh**; there is no way to retro-inject into an already-open tab.
 - `storage.onChanged` on `customSites` triggers a debounced sync, so plain storage writes from the popup are enough to register/unregister.
+
+## 智能添加站点（只填网址）
+
+- 用户只填 URL：`PromptUtils.deriveSitePattern` 推导匹配规则（域名 + 首段路径 + `/*`，深层会话 ID 会被丢掉），`PromptUtils.deriveSiteName` 从域名推导名称。两者都在 `shared/utils.js`，并有 `tests/shortcut.test.js` 覆盖。
+- `shared/detector.js` 负责页面 DOM 探测（输入框打分挑优、发送按钮语义识别、生成稳定 CSS Selector）。它有两个调用方，**因此不能依赖 PromptUtils / PromptInjector**：popup 用 `chrome.scripting.executeScript({files:["shared/detector.js"]})` 单独注入它，内容脚本则通过 manifest / `CONTENT_SCRIPT_FILES` 加载。改这个文件要同时兼顾两条路。
+- 保存时若网址正开着活动标签页，popup 当场在该页探测；否则先存 `inputSelector: ""`，由 `content/inject.js` 在用户访问该站点时补全（SPA 输入框常晚于 `document_idle`，所以按 0.8/2.5/5 秒重试几次）。
+- 已经手写过 `inputSelector` 的站点不会被自动识别覆盖，`pendingDetectSite()` 是这条保护的唯一判据。
 
 ## Configurable shortcuts — two independent layers
 

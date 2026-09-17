@@ -212,6 +212,7 @@ var CONTENT_SCRIPT_FILES = [
   "lib/lucide.min.js",
   "shared/utils.js",
   "shared/defaults.js",
+  "shared/detector.js",
   "content/panel-styles.js",
   "content/inject.js",
   "content/panel.js",

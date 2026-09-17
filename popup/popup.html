@@ -149,17 +149,26 @@
               <div id="custom-site-list" class="custom-site-list"></div>
               <div class="custom-site-form">
                 <div class="custom-site-form-title" id="custom-site-form-title">添加站点</div>
-                <input type="text" id="custom-site-name" placeholder="站点名称，如 通义千问" />
-                <input type="text" id="custom-site-pattern" placeholder="网址，如 https://example.com/*" />
-                <input type="text" id="custom-site-input" class="span-2" placeholder="输入框 CSS Selector，如 #prompt-textarea" />
-                <input type="text" id="custom-site-send" class="span-2" placeholder="发送按钮 Selector（可选）" />
-                <div class="custom-site-form-actions">
+                <div class="site-quick-add">
+                  <input type="text" id="custom-site-url" placeholder="粘贴网页 AI 网址，如 https://chat.example.com" />
                   <button id="btn-add-custom-site" class="btn btn-small btn-primary">添加</button>
-                  <button id="btn-cancel-edit-site" class="btn btn-small btn-secondary hidden">取消</button>
+                </div>
+                <div class="site-quick-actions">
+                  <button type="button" id="btn-use-current-site" class="link-btn"><i data-lucide="pointer"></i> 用当前标签页</button>
+                  <button type="button" id="btn-toggle-site-advanced" class="link-btn"><i data-lucide="sliders-horizontal"></i> 高级</button>
+                </div>
+                <div id="custom-site-advanced" class="site-advanced hidden">
+                  <input type="text" id="custom-site-name" placeholder="站点名称，如 通义千问" />
+                  <input type="text" id="custom-site-pattern" class="span-2" placeholder="匹配网址，如 https://example.com/*" />
+                  <input type="text" id="custom-site-input" class="span-2" placeholder="输入框 CSS Selector，如 #prompt-textarea" />
+                  <input type="text" id="custom-site-send" class="span-2" placeholder="发送按钮 Selector（可选）" />
+                  <div class="custom-site-form-actions">
+                    <button id="btn-cancel-edit-site" class="btn btn-small btn-secondary hidden">取消</button>
+                  </div>
                 </div>
               </div>
               <p class="settings-hint">
-                添加时会向 Chrome 申请该站点的访问权限；授权后刷新页面，悬浮球与页面内快捷键即在该站点生效。
+                只填网址即可：自动推导名称与匹配规则；网址若正开着，会当场识别输入框，否则等你下次访问该站点时补全。
               </p>
             </div>
 
@@ -208,7 +217,8 @@
       <div id="context-menu" class="context-menu hidden">
         <button class="ctx-item" data-action="inject"><i data-lucide="send"></i> 注入</button>
         <button class="ctx-item" data-action="edit"><i data-lucide="pencil"></i> 编辑</button>
-        <button class="ctx-item" data-action="duplicate"><i data-lucide="copy"></i> 复制</button>
+        <button class="ctx-item" data-action="copy"><i data-lucide="clipboard-copy"></i> 复制内容</button>
+        <button class="ctx-item" data-action="duplicate"><i data-lucide="copy-plus"></i> 创建副本</button>
         <button class="ctx-item" data-action="pin"><i data-lucide="pin"></i> 置顶/取消</button>
         <button class="ctx-item ctx-danger" data-action="delete"><i data-lucide="trash-2"></i> 删除</button>
       </div>
